@@ -2,19 +2,46 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
-import { SEEDED_TEST_USERS, setStoredUser, UserProfile } from '../../lib/auth';
-import { Lock, Mail, Scale, AlertCircle, ArrowRight, CheckCircle2, User } from 'lucide-react';
+import { SEEDED_TEST_USERS, setStoredUser, UserProfile, TEST_PASSWORDS } from '../../lib/auth';
+import { Lock, Mail, AlertCircle, ArrowRight, CheckCircle2, ShieldCheck } from 'lucide-react';
 
 export const LoginView: React.FC = () => {
   const navigate = useNavigate();
   const [email, setEmail] = useState('lithead@lextria-demo.test');
-  const [password, setPassword] = useState('');
+  const [password, setPassword] = useState(TEST_PASSWORDS['lithead@lextria-demo.test'] || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleRoleSelect = (user: UserProfile) => {
+  const handleRoleSelect = async (user: UserProfile) => {
     setEmail(user.email);
+    const pwd = TEST_PASSWORDS[user.email.toLowerCase()] || '';
+    setPassword(pwd);
     setError(null);
+
+    // If test password exists and client configured, perform immediate sign-in for seamless 1-click test login
+    if (pwd && isSupabaseConfigured) {
+      setLoading(true);
+      try {
+        const { data, error: authErr } = await supabase.auth.signInWithPassword({
+          email: user.email.toLowerCase(),
+          password: pwd,
+        });
+
+        if (authErr) {
+          throw new Error(authErr.message);
+        }
+
+        if (data?.user) {
+          setStoredUser(user);
+          navigate('/');
+          return;
+        }
+      } catch (err: any) {
+        setError(err.message || 'Authentication failed');
+      } finally {
+        setLoading(false);
+      }
+    }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -27,37 +54,43 @@ export const LoginView: React.FC = () => {
       (u) => u.email.toLowerCase() === normalizedEmail
     );
 
-    try {
-      if (isSupabaseConfigured && password.trim()) {
-        const { data, error: authErr } = await supabase.auth.signInWithPassword({
-          email: normalizedEmail,
-          password: password.trim(),
-        });
+    const pwd = password.trim() || TEST_PASSWORDS[normalizedEmail] || '';
+    if (!pwd) {
+      setError('Please provide a password.');
+      setLoading(false);
+      return;
+    }
 
-        if (!authErr && data?.user) {
-          const profile: UserProfile = matchedProfile || {
-            id: data.user.id,
-            email: data.user.email || normalizedEmail,
-            display_name: data.user.user_metadata?.display_name || normalizedEmail.split('@')[0],
-            role: data.user.user_metadata?.role || 'ASSOCIATE',
-            department: data.user.user_metadata?.department || 'LITIGATION',
-            is_finance_lead: false,
-            active: true,
-          };
-          setStoredUser(profile);
-          navigate('/');
-          return;
-        }
+    try {
+      if (!isSupabaseConfigured) {
+        throw new Error('Supabase client is not configured.');
       }
 
-      // Offline / Test fallback
-      if (matchedProfile) {
-        setStoredUser(matchedProfile);
+      const { data, error: authErr } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password: pwd,
+      });
+
+      if (authErr) {
+        throw new Error(authErr.message);
+      }
+
+      if (data?.user) {
+        const profile: UserProfile = matchedProfile || {
+          id: data.user.id,
+          email: data.user.email || normalizedEmail,
+          display_name: data.user.user_metadata?.display_name || normalizedEmail.split('@')[0],
+          role: data.user.user_metadata?.role || 'ASSOCIATE',
+          department: data.user.user_metadata?.department || 'LITIGATION',
+          is_finance_lead: false,
+          active: true,
+        };
+        setStoredUser(profile);
         navigate('/');
         return;
       }
 
-      throw new Error('User not found. Please select one of the Litigation test accounts below.');
+      throw new Error('No user returned from authentication.');
     } catch (err: any) {
       setError(err.message || 'Authentication failed');
     } finally {
@@ -103,7 +136,11 @@ export const LoginView: React.FC = () => {
                   type="email"
                   required
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    const p = TEST_PASSWORDS[e.target.value.trim().toLowerCase()];
+                    if (p) setPassword(p);
+                  }}
                   placeholder="lithead@lextria-demo.test"
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-slate-100 focus:outline-indigo-600 font-mono"
                 />
@@ -112,7 +149,7 @@ export const LoginView: React.FC = () => {
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Password <span className="text-[10px] text-slate-400 font-normal">(optional for test click-through)</span>
+                Password
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -120,6 +157,7 @@ export const LoginView: React.FC = () => {
                 </div>
                 <input
                   type="password"
+                  required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
@@ -134,7 +172,7 @@ export const LoginView: React.FC = () => {
               className="w-full flex items-center justify-center gap-2 py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-hidden disabled:opacity-50 transition cursor-pointer"
             >
               {loading ? (
-                <span>Authenticating...</span>
+                <span>Authenticating with Supabase...</span>
               ) : (
                 <>
                   <span>Sign In</span>
@@ -146,8 +184,9 @@ export const LoginView: React.FC = () => {
 
           {/* Quick Test Roles Selector */}
           <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-800">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3 text-center">
-              Quick Test Logins (1-Click Fill)
+            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3 text-center flex items-center justify-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
+              <span>1-Click Test Logins (Auto-Sign In)</span>
             </div>
             <div className="grid grid-cols-1 gap-2">
               {SEEDED_TEST_USERS.map((user) => {
@@ -156,6 +195,7 @@ export const LoginView: React.FC = () => {
                   <button
                     key={user.id}
                     type="button"
+                    disabled={loading}
                     onClick={() => handleRoleSelect(user)}
                     className={`flex items-center justify-between p-2.5 rounded-lg border text-left transition cursor-pointer ${
                       isSelected
@@ -174,7 +214,13 @@ export const LoginView: React.FC = () => {
                         <div className="text-[10px] text-slate-400 font-mono">{user.email}</div>
                       </div>
                     </div>
-                    {isSelected && <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />}
+                    {isSelected ? (
+                      <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+                    ) : (
+                      <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium hover:underline">
+                        Sign In →
+                      </span>
+                    )}
                   </button>
                 );
               })}

@@ -94,6 +94,15 @@ export const SEEDED_TEST_USERS: UserProfile[] = [
   },
 ];
 
+export const TEST_PASSWORDS: Record<string, string> = {
+  'lithead@lextria-demo.test': 'Lx!+KFU7*m#ggKKpf!9',
+  'associate@lextria-demo.test': 'Lx!QtmA!ApTrbBw62ZL',
+  'associate2@lextria-demo.test': 'Lx!sPfEnEwrCVGbuC!U',
+  'intern@lextria-demo.test': 'Lx!LmYcfzCDZehCuEe4',
+  'fl@lextria-demo.test': 'Lx!+r9Lw#cJrM2#Jtqj',
+  'sa1@lextria-demo.test': 'Lx!2A22dDQrY7KWjamc',
+};
+
 const LOCAL_STORAGE_USER_KEY = 'lextria_litigator_active_profile';
 const LOCAL_STORAGE_VIEW_AS_KEY = 'lextria_litigator_view_as_role';
 
@@ -104,8 +113,7 @@ export function getStoredUser(): UserProfile | null {
   } catch {
     // fallback
   }
-  // Default to Litigation Head for initial load
-  return SEEDED_TEST_USERS[0];
+  return null;
 }
 
 export function setStoredUser(user: UserProfile | null) {
