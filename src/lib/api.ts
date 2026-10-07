@@ -121,7 +121,279 @@ export async function addProjectAlias(params: {
 }
 
 // ==========================================
-// 2. CASES
+// 2. ENRICHMENT HELPERS (CROSS-SCHEMA FALLBACK)
+// ==========================================
+
+async function enrichCases(cases: any[]): Promise<CaseRecord[]> {
+  if (!cases || cases.length === 0) return [];
+  const projectCodeIds = [...new Set(cases.map((c) => c.project_code_id).filter(Boolean))];
+  const leadUserIds = [...new Set(cases.map((c) => c.lead_user_id).filter(Boolean))];
+
+  const pcMap = new Map<string, any>();
+  if (projectCodeIds.length > 0) {
+    const { data: pcs } = await coreDb
+      .from('project_codes')
+      .select('*, client:clients(*)')
+      .in('id', projectCodeIds);
+    (pcs || []).forEach((pc) => pcMap.set(pc.id, pc));
+  }
+
+  const profMap = new Map<string, any>();
+  if (leadUserIds.length > 0) {
+    const { data: profs } = await coreDb
+      .from('profiles')
+      .select('id, display_name, email, role, department')
+      .in('id', leadUserIds);
+    (profs || []).forEach((p) => profMap.set(p.id, p));
+  }
+
+  return cases.map((c) => ({
+    ...c,
+    project_code: c.project_code || pcMap.get(c.project_code_id) || undefined,
+    lead_user: c.lead_user || profMap.get(c.lead_user_id) || undefined,
+  })) as CaseRecord[];
+}
+
+async function enrichAgreements(agreements: any[]): Promise<AgreementRecord[]> {
+  if (!agreements || agreements.length === 0) return [];
+  const projectCodeIds = [...new Set(agreements.map((a) => a.project_code_id).filter(Boolean))];
+  const userIds = [
+    ...new Set(
+      [...agreements.map((a) => a.lead_user_id), ...agreements.map((a) => a.reviewer_user_id)].filter(
+        Boolean
+      )
+    ),
+  ];
+
+  const pcMap = new Map<string, any>();
+  if (projectCodeIds.length > 0) {
+    const { data: pcs } = await coreDb
+      .from('project_codes')
+      .select('*, client:clients(*)')
+      .in('id', projectCodeIds);
+    (pcs || []).forEach((pc) => pcMap.set(pc.id, pc));
+  }
+
+  const profMap = new Map<string, any>();
+  if (userIds.length > 0) {
+    const { data: profs } = await coreDb
+      .from('profiles')
+      .select('id, display_name, email, role, department')
+      .in('id', userIds);
+    (profs || []).forEach((p) => profMap.set(p.id, p));
+  }
+
+  return agreements.map((a) => ({
+    ...a,
+    project_code: a.project_code || pcMap.get(a.project_code_id) || undefined,
+    lead_user: a.lead_user || profMap.get(a.lead_user_id) || undefined,
+    reviewer_user: a.reviewer_user || profMap.get(a.reviewer_user_id) || undefined,
+  })) as AgreementRecord[];
+}
+
+async function enrichHearings(hearings: any[]): Promise<HearingRecord[]> {
+  if (!hearings || hearings.length === 0) return [];
+  const caseIds = [...new Set(hearings.map((h) => h.case_id).filter(Boolean))];
+  const attendedByIds = [...new Set(hearings.map((h) => h.attended_by).filter(Boolean))];
+  const docIds = [...new Set(hearings.map((h) => h.order_document_id).filter(Boolean))];
+
+  const caseMap = new Map<string, any>();
+  if (caseIds.length > 0) {
+    const { data: rawCases } = await litigatorDb.from('cases').select('*').in('id', caseIds);
+    const enriched = await enrichCases(rawCases || []);
+    enriched.forEach((c) => caseMap.set(c.id, c));
+  }
+
+  const profMap = new Map<string, any>();
+  if (attendedByIds.length > 0) {
+    const { data: profs } = await coreDb
+      .from('profiles')
+      .select('id, display_name, email, role')
+      .in('id', attendedByIds);
+    (profs || []).forEach((p) => profMap.set(p.id, p));
+  }
+
+  const docMap = new Map<string, any>();
+  if (docIds.length > 0) {
+    const { data: docs } = await coreDb
+      .from('documents')
+      .select('id, file_name, zoho_permalink, workdrive_path')
+      .in('id', docIds);
+    (docs || []).forEach((d) => docMap.set(d.id, d));
+  }
+
+  return hearings.map((h) => ({
+    ...h,
+    case: h.case || caseMap.get(h.case_id) || undefined,
+    attending_profile: h.attending_profile || profMap.get(h.attended_by) || undefined,
+    order_document: h.order_document || docMap.get(h.order_document_id) || undefined,
+  })) as HearingRecord[];
+}
+
+async function enrichOrders(orders: any[]): Promise<OrderRecord[]> {
+  if (!orders || orders.length === 0) return [];
+  const caseIds = [...new Set(orders.map((o) => o.case_id).filter(Boolean))];
+  const ownerIds = [...new Set(orders.map((o) => o.compliance_owner).filter(Boolean))];
+  const docIds = [...new Set(orders.map((o) => o.document_id).filter(Boolean))];
+
+  const caseMap = new Map<string, any>();
+  if (caseIds.length > 0) {
+    const { data: rawCases } = await litigatorDb
+      .from('cases')
+      .select('id, cause_title, court')
+      .in('id', caseIds);
+    (rawCases || []).forEach((c) => caseMap.set(c.id, c));
+  }
+
+  const profMap = new Map<string, any>();
+  if (ownerIds.length > 0) {
+    const { data: profs } = await coreDb
+      .from('profiles')
+      .select('id, display_name, email, role')
+      .in('id', ownerIds);
+    (profs || []).forEach((p) => profMap.set(p.id, p));
+  }
+
+  const docMap = new Map<string, any>();
+  if (docIds.length > 0) {
+    const { data: docs } = await coreDb
+      .from('documents')
+      .select('id, file_name, zoho_permalink, workdrive_path')
+      .in('id', docIds);
+    (docs || []).forEach((d) => docMap.set(d.id, d));
+  }
+
+  return orders.map((o) => ({
+    ...o,
+    case: o.case || caseMap.get(o.case_id) || undefined,
+    compliance_owner_profile: o.compliance_owner_profile || profMap.get(o.compliance_owner) || undefined,
+    document: o.document || docMap.get(o.document_id) || undefined,
+  })) as OrderRecord[];
+}
+
+async function enrichDeadlines(deadlines: any[]): Promise<DeadlineRecord[]> {
+  if (!deadlines || deadlines.length === 0) return [];
+  const caseIds = [...new Set(deadlines.map((d) => d.case_id).filter(Boolean))];
+  const agrIds = [...new Set(deadlines.map((d) => d.agreement_id).filter(Boolean))];
+  const userIds = [
+    ...new Set(
+      [...deadlines.map((d) => d.owner_user_id), ...deadlines.map((d) => d.backup_user_id)].filter(
+        Boolean
+      )
+    ),
+  ];
+
+  const caseMap = new Map<string, any>();
+  if (caseIds.length > 0) {
+    const { data: cs } = await litigatorDb
+      .from('cases')
+      .select('id, cause_title, case_number, court')
+      .in('id', caseIds);
+    (cs || []).forEach((c) => caseMap.set(c.id, c));
+  }
+
+  const agrMap = new Map<string, any>();
+  if (agrIds.length > 0) {
+    const { data: agrs } = await litigatorDb
+      .from('agreements')
+      .select('id, title, agreement_type, stage')
+      .in('id', agrIds);
+    (agrs || []).forEach((a) => agrMap.set(a.id, a));
+  }
+
+  const profMap = new Map<string, any>();
+  if (userIds.length > 0) {
+    const { data: profs } = await coreDb
+      .from('profiles')
+      .select('id, display_name, email, role')
+      .in('id', userIds);
+    (profs || []).forEach((p) => profMap.set(p.id, p));
+  }
+
+  return deadlines.map((d) => ({
+    ...d,
+    case: d.case || caseMap.get(d.case_id) || undefined,
+    agreement: d.agreement || agrMap.get(d.agreement_id) || undefined,
+    owner_profile: d.owner_profile || profMap.get(d.owner_user_id) || undefined,
+    backup_profile: d.backup_profile || profMap.get(d.backup_user_id) || undefined,
+  })) as DeadlineRecord[];
+}
+
+async function enrichInternalNotes(notes: any[]): Promise<InternalNoteRecord[]> {
+  if (!notes || notes.length === 0) return [];
+  const authorIds = [...new Set(notes.map((n) => n.author).filter(Boolean))];
+
+  const profMap = new Map<string, any>();
+  if (authorIds.length > 0) {
+    const { data: profs } = await coreDb
+      .from('profiles')
+      .select('id, display_name, email, role')
+      .in('id', authorIds);
+    (profs || []).forEach((p) => profMap.set(p.id, p));
+  }
+
+  return notes.map((n) => ({
+    ...n,
+    author_profile: n.author_profile || profMap.get(n.author) || undefined,
+  })) as InternalNoteRecord[];
+}
+
+async function enrichLinkedIP(linkedIp: any[]): Promise<LinkedIPRecord[]> {
+  if (!linkedIp || linkedIp.length === 0) return [];
+  const pcIds = [...new Set(linkedIp.map((l) => l.project_code_id).filter(Boolean))];
+
+  const pcMap = new Map<string, any>();
+  if (pcIds.length > 0) {
+    const { data: pcs } = await coreDb.from('project_codes').select('*').in('id', pcIds);
+    (pcs || []).forEach((pc) => pcMap.set(pc.id, pc));
+  }
+
+  return linkedIp.map((l) => ({
+    ...l,
+    project_code: l.project_code || pcMap.get(l.project_code_id) || undefined,
+  })) as LinkedIPRecord[];
+}
+
+async function enrichAgreementVersions(versions: any[]): Promise<AgreementVersionRecord[]> {
+  if (!versions || versions.length === 0) return [];
+  const docIds = [...new Set(versions.map((v) => v.document_id).filter(Boolean))];
+
+  const docMap = new Map<string, any>();
+  if (docIds.length > 0) {
+    const { data: docs } = await coreDb
+      .from('documents')
+      .select('id, file_name, zoho_permalink, workdrive_path, size_bytes')
+      .in('id', docIds);
+    (docs || []).forEach((d) => docMap.set(d.id, d));
+  }
+
+  return versions.map((v) => ({
+    ...v,
+    document: v.document || docMap.get(v.document_id) || undefined,
+  })) as AgreementVersionRecord[];
+}
+
+async function enrichTemplates(templates: any[]): Promise<TemplateRecord[]> {
+  if (!templates || templates.length === 0) return [];
+  const docIds = [...new Set(templates.map((t) => t.document_id).filter(Boolean))];
+
+  const docMap = new Map<string, any>();
+  if (docIds.length > 0) {
+    const { data: docs } = await coreDb
+      .from('documents')
+      .select('id, file_name, zoho_permalink, workdrive_path, size_bytes')
+      .in('id', docIds);
+    (docs || []).forEach((d) => docMap.set(d.id, d));
+  }
+
+  return templates.map((t) => ({
+    ...t,
+    document: t.document || docMap.get(t.document_id) || undefined,
+  })) as TemplateRecord[];
+}
+
+// ==========================================
+// 3. CASES
 // ==========================================
 
 export async function fetchCases(filters?: {
@@ -132,16 +404,10 @@ export async function fetchCases(filters?: {
   search?: string;
   dateRange?: { start?: string; end?: string };
 }): Promise<CaseRecord[]> {
+  // 1. Try litigator.cases_view
   let query = litigatorDb
-    .from('cases')
-    .select(`
-      *,
-      project_code:project_code_id (
-        id, code, title, client_id,
-        client:client_id (id, client_code, client_name)
-      ),
-      lead_user:lead_user_id (id, display_name, email, role)
-    `)
+    .from('cases_view')
+    .select('*')
     .order('next_hearing_date', { ascending: true, nullsFirst: false });
 
   if (filters?.stage) query = query.eq('current_stage', filters.stage);
@@ -151,9 +417,27 @@ export async function fetchCases(filters?: {
   if (filters?.dateRange?.end) query = query.lte('next_hearing_date', filters.dateRange.end);
 
   const { data, error } = await query;
-  if (error) throw error;
+  let cases: CaseRecord[];
 
-  let cases = (data || []) as CaseRecord[];
+  if (!error && data) {
+    cases = data as CaseRecord[];
+  } else {
+    // Fallback to separate queries
+    let fallbackQuery = litigatorDb
+      .from('cases')
+      .select('*')
+      .order('next_hearing_date', { ascending: true, nullsFirst: false });
+
+    if (filters?.stage) fallbackQuery = fallbackQuery.eq('current_stage', filters.stage);
+    if (filters?.court) fallbackQuery = fallbackQuery.ilike('court', `%${filters.court}%`);
+    if (filters?.leadUserId) fallbackQuery = fallbackQuery.eq('lead_user_id', filters.leadUserId);
+    if (filters?.dateRange?.start) fallbackQuery = fallbackQuery.gte('next_hearing_date', filters.dateRange.start);
+    if (filters?.dateRange?.end) fallbackQuery = fallbackQuery.lte('next_hearing_date', filters.dateRange.end);
+
+    const { data: rawCases, error: cErr } = await fallbackQuery;
+    if (cErr) throw cErr;
+    cases = await enrichCases(rawCases || []);
+  }
 
   // In-memory filter for deep relations like client and search
   if (filters?.clientId) {
@@ -177,19 +461,25 @@ export async function fetchCases(filters?: {
 
 export async function fetchCaseById(id: string): Promise<CaseRecord> {
   const { data, error } = await litigatorDb
-    .from('cases')
-    .select(`
-      *,
-      project_code:project_code_id (
-        id, code, title, client_id,
-        client:client_id (id, client_code, client_name, entity_type, email, phone)
-      ),
-      lead_user:lead_user_id (id, display_name, email, role)
-    `)
+    .from('cases_view')
+    .select('*')
     .eq('id', id)
     .single();
-  if (error) throw error;
-  return data as CaseRecord;
+
+  if (!error && data) {
+    return data as CaseRecord;
+  }
+
+  // Fallback to separate queries
+  const { data: rawCase, error: cErr } = await litigatorDb
+    .from('cases')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (cErr) throw cErr;
+
+  const [enriched] = await enrichCases([rawCase]);
+  return enriched;
 }
 
 export interface CreateCaseParams {
@@ -214,7 +504,7 @@ export interface CreateCaseParams {
   newClientCode?: string;
 }
 
-export async function createCase(params: CreateCaseParams): Promise<CaseRecord> {
+export async function createCase(params: CreateCaseParams): Promise<{ id: string }> {
   const { data, error } = await supabase.schema('litigator').rpc('create_case', {
     p_project_code: params.projectCode,
     p_case_type: params.caseType,
@@ -238,50 +528,45 @@ export async function createCase(params: CreateCaseParams): Promise<CaseRecord> 
   });
 
   if (error) throw error;
-  const newCaseId = data as string;
-
-  const newCase = await fetchCaseById(newCaseId);
-  return newCase;
+  return { id: data as string };
 }
 
 export async function updateCase(
   caseId: string,
   updates: Partial<CaseRecord>
 ): Promise<CaseRecord> {
-  const { data, error } = await litigatorDb
+  const { error } = await litigatorDb
     .from('cases')
     .update(updates)
-    .eq('id', caseId)
-    .select()
-    .single();
+    .eq('id', caseId);
   if (error) throw error;
-  return data as CaseRecord;
+  return fetchCaseById(caseId);
 }
 
 // ==========================================
-// 3. CASE SUB-ENTITIES: HEARINGS, ORDERS, PARTIES, NOTES, LINKED IP
+// 4. CASE SUB-ENTITIES: HEARINGS, ORDERS, PARTIES, NOTES, LINKED IP
 // ==========================================
 
 export async function fetchHearings(caseId: string): Promise<HearingRecord[]> {
   const { data, error } = await litigatorDb
-    .from('hearings')
-    .select(`
-      *,
-      attending_profile:attended_by (id, display_name, email, role),
-      order_document:order_document_id (id, file_name, zoho_permalink, workdrive_path)
-    `)
+    .from('hearings_view')
+    .select('*')
     .eq('case_id', caseId)
     .order('hearing_date', { ascending: false });
-  if (error) throw error;
-  return (data || []) as HearingRecord[];
+
+  if (!error && data) {
+    return data as HearingRecord[];
+  }
+
+  const { data: rawH, error: hErr } = await litigatorDb
+    .from('hearings')
+    .select('*')
+    .eq('case_id', caseId)
+    .order('hearing_date', { ascending: false });
+  if (hErr) throw hErr;
+  return enrichHearings(rawH || []);
 }
 
-/**
- * "Update after hearing" action:
- * One form for outcome + next date + next purpose.
- * It saves the hearing, creates the next hearing row, updates cases.next_hearing_date,
- * and writes a HEARING_ATTENDED event.
- */
 export async function updateAfterHearing(params: {
   caseId: string;
   hearingId?: string;
@@ -377,16 +662,22 @@ export async function updateAfterHearing(params: {
 
 export async function fetchOrders(caseId: string): Promise<OrderRecord[]> {
   const { data, error } = await litigatorDb
-    .from('orders')
-    .select(`
-      *,
-      compliance_owner_profile:compliance_owner (id, display_name, email, role),
-      document:document_id (id, file_name, zoho_permalink, workdrive_path)
-    `)
+    .from('orders_view')
+    .select('*')
     .eq('case_id', caseId)
     .order('order_date', { ascending: false });
-  if (error) throw error;
-  return (data || []) as OrderRecord[];
+
+  if (!error && data) {
+    return data as OrderRecord[];
+  }
+
+  const { data: rawO, error: oErr } = await litigatorDb
+    .from('orders')
+    .select('*')
+    .eq('case_id', caseId)
+    .order('order_date', { ascending: false });
+  if (oErr) throw oErr;
+  return enrichOrders(rawO || []);
 }
 
 export async function createOrder(order: Partial<OrderRecord>): Promise<OrderRecord> {
@@ -421,15 +712,22 @@ export async function createParty(party: Partial<CasePartyRecord>): Promise<Case
 
 export async function fetchInternalNotes(caseId: string): Promise<InternalNoteRecord[]> {
   const { data, error } = await litigatorDb
-    .from('internal_notes')
-    .select(`
-      *,
-      author_profile:author (id, display_name, email, role)
-    `)
+    .from('internal_notes_view')
+    .select('*')
     .eq('case_id', caseId)
     .order('created_at', { ascending: false });
-  if (error) throw error;
-  return (data || []) as InternalNoteRecord[];
+
+  if (!error && data) {
+    return data as InternalNoteRecord[];
+  }
+
+  const { data: rawN, error: nErr } = await litigatorDb
+    .from('internal_notes')
+    .select('*')
+    .eq('case_id', caseId)
+    .order('created_at', { ascending: false });
+  if (nErr) throw nErr;
+  return enrichInternalNotes(rawN || []);
 }
 
 export async function createInternalNote(caseId: string, note: string, authorId: string) {
@@ -448,11 +746,20 @@ export async function createInternalNote(caseId: string, note: string, authorId:
 
 export async function fetchLinkedIP(caseId: string): Promise<LinkedIPRecord[]> {
   const { data, error } = await litigatorDb
-    .from('linked_ip')
-    .select('*, project_code:project_code_id(*)')
+    .from('linked_ip_view')
+    .select('*')
     .eq('case_id', caseId);
-  if (error) throw error;
-  return (data || []) as LinkedIPRecord[];
+
+  if (!error && data) {
+    return data as LinkedIPRecord[];
+  }
+
+  const { data: rawL, error: lErr } = await litigatorDb
+    .from('linked_ip')
+    .select('*')
+    .eq('case_id', caseId);
+  if (lErr) throw lErr;
+  return enrichLinkedIP(rawL || []);
 }
 
 export async function createLinkedIP(params: Partial<LinkedIPRecord>) {
@@ -466,7 +773,7 @@ export async function createLinkedIP(params: Partial<LinkedIPRecord>) {
 }
 
 // ==========================================
-// 4. DEADLINES
+// 5. DEADLINES
 // ==========================================
 
 export async function fetchDeadlines(filters?: {
@@ -476,14 +783,8 @@ export async function fetchDeadlines(filters?: {
   status?: 'OPEN' | 'DONE';
 }): Promise<DeadlineRecord[]> {
   let query = litigatorDb
-    .from('deadlines')
-    .select(`
-      *,
-      owner_profile:owner_user_id (id, display_name, email, role),
-      backup_profile:backup_user_id (id, display_name, email, role),
-      case:case_id (id, cause_title, case_number, court),
-      agreement:agreement_id (id, title, agreement_type, stage)
-    `)
+    .from('deadlines_view')
+    .select('*')
     .order('due_date', { ascending: true });
 
   if (filters?.caseId) query = query.eq('case_id', filters.caseId);
@@ -492,8 +793,23 @@ export async function fetchDeadlines(filters?: {
   if (filters?.status) query = query.eq('status', filters.status);
 
   const { data, error } = await query;
-  if (error) throw error;
-  return (data || []) as DeadlineRecord[];
+  if (!error && data) {
+    return data as DeadlineRecord[];
+  }
+
+  let fallbackQuery = litigatorDb
+    .from('deadlines')
+    .select('*')
+    .order('due_date', { ascending: true });
+
+  if (filters?.caseId) fallbackQuery = fallbackQuery.eq('case_id', filters.caseId);
+  if (filters?.agreementId) fallbackQuery = fallbackQuery.eq('agreement_id', filters.agreementId);
+  if (filters?.ownerId) fallbackQuery = fallbackQuery.eq('owner_user_id', filters.ownerId);
+  if (filters?.status) fallbackQuery = fallbackQuery.eq('status', filters.status);
+
+  const { data: rawD, error: dErr } = await fallbackQuery;
+  if (dErr) throw dErr;
+  return enrichDeadlines(rawD || []);
 }
 
 export async function createDeadline(deadline: {
@@ -537,7 +853,7 @@ export async function markDeadlineDone(id: string, doneNote?: string) {
 }
 
 // ==========================================
-// 5. AGREEMENTS & CONTRACTS
+// 6. AGREEMENTS & CONTRACTS
 // ==========================================
 
 export async function fetchAgreements(filters?: {
@@ -547,16 +863,8 @@ export async function fetchAgreements(filters?: {
   search?: string;
 }): Promise<AgreementRecord[]> {
   let query = litigatorDb
-    .from('agreements')
-    .select(`
-      *,
-      project_code:project_code_id (
-        id, code, title, client_id,
-        client:client_id (id, client_code, client_name)
-      ),
-      lead_user:lead_user_id (id, display_name, email, role),
-      reviewer_user:reviewer_user_id (id, display_name, email, role)
-    `)
+    .from('agreements_view')
+    .select('*')
     .order('created_at', { ascending: false });
 
   if (filters?.stage) query = query.eq('stage', filters.stage);
@@ -564,9 +872,25 @@ export async function fetchAgreements(filters?: {
   if (filters?.leadUserId) query = query.eq('lead_user_id', filters.leadUserId);
 
   const { data, error } = await query;
-  if (error) throw error;
+  let list: AgreementRecord[];
 
-  let list = (data || []) as AgreementRecord[];
+  if (!error && data) {
+    list = data as AgreementRecord[];
+  } else {
+    let fallbackQuery = litigatorDb
+      .from('agreements')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (filters?.stage) fallbackQuery = fallbackQuery.eq('stage', filters.stage);
+    if (filters?.agreementType) fallbackQuery = fallbackQuery.eq('agreement_type', filters.agreementType);
+    if (filters?.leadUserId) fallbackQuery = fallbackQuery.eq('lead_user_id', filters.leadUserId);
+
+    const { data: rawAgrs, error: aErr } = await fallbackQuery;
+    if (aErr) throw aErr;
+    list = await enrichAgreements(rawAgrs || []);
+  }
+
   if (filters?.search) {
     const s = filters.search.toLowerCase();
     list = list.filter(
@@ -581,20 +905,24 @@ export async function fetchAgreements(filters?: {
 
 export async function fetchAgreementById(id: string): Promise<AgreementRecord> {
   const { data, error } = await litigatorDb
-    .from('agreements')
-    .select(`
-      *,
-      project_code:project_code_id (
-        id, code, title, client_id,
-        client:client_id (id, client_code, client_name, email, phone)
-      ),
-      lead_user:lead_user_id (id, display_name, email, role),
-      reviewer_user:reviewer_user_id (id, display_name, email, role)
-    `)
+    .from('agreements_view')
+    .select('*')
     .eq('id', id)
     .single();
-  if (error) throw error;
-  return data as AgreementRecord;
+
+  if (!error && data) {
+    return data as AgreementRecord;
+  }
+
+  const { data: rawAgr, error: aErr } = await litigatorDb
+    .from('agreements')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (aErr) throw aErr;
+
+  const [enriched] = await enrichAgreements([rawAgr]);
+  return enriched;
 }
 
 export interface CreateAgreementParams {
@@ -622,7 +950,7 @@ export interface CreateAgreementParams {
   counterpartyName?: string;
 }
 
-export async function createAgreement(params: CreateAgreementParams): Promise<AgreementRecord> {
+export async function createAgreement(params: CreateAgreementParams): Promise<{ id: string }> {
   const { data, error } = await supabase.schema('litigator').rpc('create_agreement', {
     p_project_code: params.projectCode,
     p_agreement_type: params.agreementType,
@@ -649,10 +977,7 @@ export async function createAgreement(params: CreateAgreementParams): Promise<Ag
   });
 
   if (error) throw error;
-  const newAgreementId = data as string;
-
-  const newAgr = await fetchAgreementById(newAgreementId);
-  return newAgr;
+  return { id: data as string };
 }
 
 export async function updateAgreementStage(
@@ -660,7 +985,6 @@ export async function updateAgreementStage(
   newStage: AgreementStage,
   extraParams?: { executionDate?: string }
 ): Promise<AgreementRecord> {
-  // 1. Fetch versions to validate review stage rules
   const { data: versions } = await litigatorDb
     .from('agreement_versions')
     .select('sent_to')
@@ -699,18 +1023,15 @@ export async function updateAgreementStage(
     }
   }
 
-  const { data, error } = await litigatorDb
+  const { error } = await litigatorDb
     .from('agreements')
     .update(updatePayload)
-    .eq('id', agreementId)
-    .select()
-    .single();
+    .eq('id', agreementId);
 
   if (error) throw error;
 
-  const updated = data as AgreementRecord;
+  const updated = await fetchAgreementById(agreementId);
 
-  // Log corresponding matter events
   const stageEventMap: Record<string, string> = {
     CLIENT_REVIEW: 'AGR_CLIENT_APPROVED',
     COUNTERPARTY_REVIEW: 'AGR_COUNTERPARTY_SENT',
@@ -737,15 +1058,22 @@ export async function fetchAgreementVersions(
   agreementId: string
 ): Promise<AgreementVersionRecord[]> {
   const { data, error } = await litigatorDb
-    .from('agreement_versions')
-    .select(`
-      *,
-      document:document_id (id, file_name, zoho_permalink, workdrive_path, size_bytes)
-    `)
+    .from('agreement_versions_view')
+    .select('*')
     .eq('agreement_id', agreementId)
     .order('version_no', { ascending: false });
-  if (error) throw error;
-  return (data || []) as AgreementVersionRecord[];
+
+  if (!error && data) {
+    return data as AgreementVersionRecord[];
+  }
+
+  const { data: rawV, error: vErr } = await litigatorDb
+    .from('agreement_versions')
+    .select('*')
+    .eq('agreement_id', agreementId)
+    .order('version_no', { ascending: false });
+  if (vErr) throw vErr;
+  return enrichAgreementVersions(rawV || []);
 }
 
 export async function addAgreementVersion(params: {
@@ -769,7 +1097,6 @@ export async function addAgreementVersion(params: {
     .single();
   if (error) throw error;
 
-  // If version 1 sent to client, record AGR_V1_SENT
   if (params.versionNo === 1 && params.sentTo === 'CLIENT') {
     const agr = await fetchAgreementById(params.agreementId);
     await recordMatterEvent({
@@ -810,18 +1137,28 @@ export async function addAgreementParty(
 }
 
 // ==========================================
-// 6. TEMPLATES
+// 7. TEMPLATES
 // ==========================================
 
 export async function fetchTemplates(agreementType?: string): Promise<TemplateRecord[]> {
   let query = litigatorDb
-    .from('templates')
-    .select('*, document:document_id(*)')
+    .from('templates_view')
+    .select('*')
     .order('name');
   if (agreementType) query = query.eq('agreement_type', agreementType);
   const { data, error } = await query;
-  if (error) throw error;
-  return (data || []) as TemplateRecord[];
+  if (!error && data) {
+    return data as TemplateRecord[];
+  }
+
+  let fallbackQuery = litigatorDb
+    .from('templates')
+    .select('*')
+    .order('name');
+  if (agreementType) fallbackQuery = fallbackQuery.eq('agreement_type', agreementType);
+  const { data: rawT, error: tErr } = await fallbackQuery;
+  if (tErr) throw tErr;
+  return enrichTemplates(rawT || []);
 }
 
 export async function createTemplate(params: {
@@ -845,52 +1182,63 @@ export async function createTemplate(params: {
 }
 
 // ==========================================
-// 7. DAILY CAUSE LIST & CALENDAR
+// 8. DAILY CAUSE LIST & CALENDAR
 // ==========================================
 
 export async function fetchDailyCauseList(dateStr: string) {
   const { data, error } = await litigatorDb
-    .from('hearings')
-    .select(`
-      *,
-      case:case_id (
-        id, cause_title, case_number, cnr_number, court, bench, current_stage,
-        client_role, claim_value, lead_user_id,
-        project_code:project_code_id (code, client:client_id(client_name)),
-        lead_user:lead_user_id (display_name, email)
-      ),
-      attending_profile:attended_by (display_name, email)
-    `)
+    .from('hearings_view')
+    .select('*')
     .eq('hearing_date', dateStr)
     .order('purpose');
 
-  if (error) throw error;
-  return (data || []) as any[];
+  if (!error && data) {
+    return data as any[];
+  }
+
+  const { data: rawH, error: hErr } = await litigatorDb
+    .from('hearings')
+    .select('*')
+    .eq('hearing_date', dateStr)
+    .order('purpose');
+  if (hErr) throw hErr;
+  return enrichHearings(rawH || []);
 }
 
 export async function fetchCalendarEvents(monthStart: string, monthEnd: string) {
-  // Fetch hearings in range
-  const { data: hearings } = await litigatorDb
-    .from('hearings')
-    .select(`
-      id, hearing_date, purpose, outcome, attended_by,
-      case:case_id (id, cause_title, case_number, court, lead_user_id),
-      attending_profile:attended_by (id, display_name)
-    `)
-    .gte('hearing_date', monthStart)
-    .lte('hearing_date', monthEnd);
+  const [hRes, dRes] = await Promise.all([
+    litigatorDb
+      .from('hearings_view')
+      .select('*')
+      .gte('hearing_date', monthStart)
+      .lte('hearing_date', monthEnd),
+    litigatorDb
+      .from('deadlines_view')
+      .select('*')
+      .gte('due_date', monthStart)
+      .lte('due_date', monthEnd),
+  ]);
 
-  // Fetch deadlines in range
-  const { data: deadlines } = await litigatorDb
-    .from('deadlines')
-    .select(`
-      id, title, due_date, deadline_type, status, owner_user_id,
-      case:case_id (id, cause_title, case_number),
-      agreement:agreement_id (id, title),
-      owner_profile:owner_user_id (id, display_name)
-    `)
-    .gte('due_date', monthStart)
-    .lte('due_date', monthEnd);
+  let hearings = hRes.data;
+  let deadlines = dRes.data;
+
+  if (hRes.error || !hearings) {
+    const { data: rawH } = await litigatorDb
+      .from('hearings')
+      .select('*')
+      .gte('hearing_date', monthStart)
+      .lte('hearing_date', monthEnd);
+    hearings = await enrichHearings(rawH || []);
+  }
+
+  if (dRes.error || !deadlines) {
+    const { data: rawD } = await litigatorDb
+      .from('deadlines')
+      .select('*')
+      .gte('due_date', monthStart)
+      .lte('due_date', monthEnd);
+    deadlines = await enrichDeadlines(rawD || []);
+  }
 
   return {
     hearings: (hearings || []) as any[],
@@ -899,7 +1247,105 @@ export async function fetchCalendarEvents(monthStart: string, monthEnd: string) 
 }
 
 // ==========================================
-// 8. MATTER EVENTS (TIMELINE)
+// 9. TODAY DASHBOARD
+// ==========================================
+
+export async function fetchTodayDashboard(todayStr: string, next7Days: string) {
+  // 1. Hearings
+  let hData: any[] | null = null;
+  const { data: vH, error: vHErr } = await litigatorDb
+    .from('hearings_view')
+    .select('*')
+    .gte('hearing_date', todayStr)
+    .lte('hearing_date', next7Days)
+    .order('hearing_date', { ascending: true });
+
+  if (!vHErr && vH) {
+    hData = vH;
+  } else {
+    const { data: rawH } = await litigatorDb
+      .from('hearings')
+      .select('*')
+      .gte('hearing_date', todayStr)
+      .lte('hearing_date', next7Days)
+      .order('hearing_date', { ascending: true });
+    hData = await enrichHearings(rawH || []);
+  }
+
+  // 2. Unupdated past hearings
+  let unData: any[] | null = null;
+  const { data: vUn, error: vUnErr } = await litigatorDb
+    .from('hearings_view')
+    .select('*')
+    .lte('hearing_date', todayStr)
+    .is('outcome', null)
+    .order('hearing_date', { ascending: false });
+
+  if (!vUnErr && vUn) {
+    unData = vUn;
+  } else {
+    const { data: rawUn } = await litigatorDb
+      .from('hearings')
+      .select('*')
+      .lte('hearing_date', todayStr)
+      .is('outcome', null)
+      .order('hearing_date', { ascending: false });
+    unData = await enrichHearings(rawUn || []);
+  }
+
+  // 3. Deadlines
+  let dData: any[] | null = null;
+  const { data: vD, error: vDErr } = await litigatorDb
+    .from('deadlines_view')
+    .select('*')
+    .eq('status', 'OPEN')
+    .order('due_date', { ascending: true });
+
+  if (!vDErr && vD) {
+    dData = vD;
+  } else {
+    const { data: rawD } = await litigatorDb
+      .from('deadlines')
+      .select('*')
+      .eq('status', 'OPEN')
+      .order('due_date', { ascending: true });
+    dData = await enrichDeadlines(rawD || []);
+  }
+
+  // 4. Pending orders
+  let oData: any[] | null = null;
+  const { data: vO, error: vOErr } = await litigatorDb
+    .from('orders_view')
+    .select('*')
+    .eq('compliance_required', true)
+    .order('compliance_due', { ascending: true });
+
+  if (!vOErr && vO) {
+    oData = vO;
+  } else {
+    const { data: rawO } = await litigatorDb
+      .from('orders')
+      .select('*')
+      .eq('compliance_required', true)
+      .order('compliance_due', { ascending: true });
+    oData = await enrichOrders(rawO || []);
+  }
+
+  const allH = hData || [];
+  const allD = dData || [];
+
+  return {
+    todayHearings: allH.filter((h: any) => h.hearing_date === todayStr),
+    weekHearings: allH.filter((h: any) => h.hearing_date !== todayStr),
+    unupdatedHearings: unData || [],
+    overdueDeadlines: allD.filter((d: any) => d.due_date < todayStr),
+    upcomingDeadlines: allD.filter((d: any) => d.due_date >= todayStr && d.due_date <= next7Days),
+    pendingOrders: oData || [],
+  };
+}
+
+// ==========================================
+// 10. MATTER EVENTS (TIMELINE)
 // ==========================================
 
 export async function fetchMatterEvents(projectCodeId: string): Promise<CoreMatterEvent[]> {
@@ -954,7 +1400,7 @@ export async function recordMatterEvent(params: {
 }
 
 // ==========================================
-// 9. CLIQ NOTIFICATIONS & OUTBOX
+// 11. CLIQ NOTIFICATIONS & OUTBOX
 // ==========================================
 
 export async function fetchCliqOutbox(): Promise<CliqOutboxItem[]> {

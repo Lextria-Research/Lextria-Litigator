@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { litigatorDb } from '../../lib/supabase';
 import { clock } from '../../lib/clock';
+import { fetchTodayDashboard } from '../../lib/api';
 import { UpdateHearingModal } from '../cases/UpdateHearingModal';
 import { NewCaseModal } from '../cases/NewCaseModal';
 import { NewAgreementModal } from '../agreements/NewAgreementModal';
@@ -48,70 +49,13 @@ export const TodayView: React.FC = () => {
     const next7Days = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
     try {
-      // 1. Today & this week hearings
-      const { data: hData } = await litigatorDb
-        .from('hearings')
-        .select(`
-          *,
-          case:case_id (
-            id, cause_title, case_number, court, bench, cnr_number, lead_user_id,
-            project_code:project_code_id (code)
-          ),
-          attending_profile:attended_by (display_name)
-        `)
-        .gte('hearing_date', todayStr)
-        .lte('hearing_date', next7Days)
-        .order('hearing_date', { ascending: true });
-
-      const allH = hData || [];
-      setTodayHearings(allH.filter((h) => h.hearing_date === todayStr));
-      setWeekHearings(allH.filter((h) => h.hearing_date !== todayStr));
-
-      // 2. Unupdated past hearings (date passed, outcome null)
-      const { data: unData } = await litigatorDb
-        .from('hearings')
-        .select(`
-          *,
-          case:case_id (
-            id, cause_title, case_number, court, lead_user_id,
-            project_code:project_code_id (id, code, client_id, client:client_id(client_code, client_name))
-          ),
-          attending_profile:attended_by (display_name)
-        `)
-        .lte('hearing_date', todayStr)
-        .is('outcome', null)
-        .order('hearing_date', { ascending: false });
-
-      setUnupdatedHearings(unData || []);
-
-      // 3. Deadlines (next 7 days + overdue)
-      const { data: dData } = await litigatorDb
-        .from('deadlines')
-        .select(`
-          *,
-          owner_profile:owner_user_id (display_name),
-          case:case_id (id, cause_title, case_number),
-          agreement:agreement_id (id, title)
-        `)
-        .eq('status', 'OPEN')
-        .order('due_date', { ascending: true });
-
-      const allD = dData || [];
-      setOverdueDeadlines(allD.filter((d) => d.due_date < todayStr));
-      setUpcomingDeadlines(allD.filter((d) => d.due_date >= todayStr && d.due_date <= next7Days));
-
-      // 4. Orders with compliance required
-      const { data: oData } = await litigatorDb
-        .from('orders')
-        .select(`
-          *,
-          compliance_owner_profile:compliance_owner (display_name),
-          case:case_id (id, cause_title, court)
-        `)
-        .eq('compliance_required', true)
-        .order('compliance_due', { ascending: true });
-
-      setPendingOrders(oData || []);
+      const dashboard = await fetchTodayDashboard(todayStr, next7Days);
+      setTodayHearings(dashboard.todayHearings);
+      setWeekHearings(dashboard.weekHearings);
+      setUnupdatedHearings(dashboard.unupdatedHearings);
+      setOverdueDeadlines(dashboard.overdueDeadlines);
+      setUpcomingDeadlines(dashboard.upcomingDeadlines);
+      setPendingOrders(dashboard.pendingOrders);
     } catch (err) {
       console.error('Error loading Today dashboard:', err);
     } finally {
