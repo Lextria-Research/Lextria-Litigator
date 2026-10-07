@@ -1,0 +1,19 @@
+{
+  "framework": "vite",
+  "crons": [
+    {
+      "path": "/api/cron",
+      "schedule": "30 12 * * *"
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

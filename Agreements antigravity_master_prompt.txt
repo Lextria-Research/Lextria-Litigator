@@ -1,0 +1,23 @@
+Build a full-stack web application for a law firm called Lextria Research to track agreement drafting and version control. Use Python/Flask for the backend, SQLite for the database, and HTML/Tailwind CSS for the frontend UI. 
+
+**Database & Data Model:**
+Create three relational tables:
+1. `Agreements`: id, client_name, intake_source (Email, WhatsApp, In-Person), agreement_type, specific_requirements, assigned_to (dropdown: Pranav, Sharan), status.
+2. `Parties`: id, agreement_id (foreign key), party_name, party_role. (Must allow an infinite number of parties to be linked dynamically to a single agreement).
+3. `Versions`: id, agreement_id (foreign key), version_number, sent_date, notes.
+
+**Business Logic & Automation:**
+- Template Flagging: If an agreement is created with zero associated parties, automatically classify/flag it as a "Template Agreement".
+- Version Timestamps: Logging a new version in the `Versions` table must automatically update a "Latest Version Sent" timestamp on the main `Agreements` parent record.
+
+**Frontend Dashboard UI Requirements:**
+1. Kanban Board (Home): Display active agreements as cards moving through these specific columns based on their status: Intake -> Drafting -> Client Review -> Counterparty Review -> Finalized.
+2. Agreement Detail View: A dedicated page for each agreement showing the client's custom notes. It must have dynamic forms to add/remove multiple parties and log new drafting versions. 
+3. Template Library: A dedicated, filtered view showing only the agreements that are flagged as "Template Agreement" (those with no parties).
+
+**Integration (Connecting to Finance Dashboard):**
+Update the Python backend to include an outbound webhook trigger. 
+Whenever a new Agreement is created in the database, automatically send a POST request with a JSON payload to an external webhook URL (please provide a way to set this URL via an environment variable). 
+The JSON payload must contain: `Agreement ID`, `Client Name`, `Agreement Type`, and `Creation Timestamp`. This is critical for updating the client ledger in our existing finance system.
+
+Please generate the implementation plan, write the code, spin up the local server, and launch the web application for me to review.
