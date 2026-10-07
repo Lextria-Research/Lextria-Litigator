@@ -45,7 +45,7 @@ import {
   getDocumentUrl,
   LITIGATION_FILE_CATEGORIES,
 } from '../../lib/files';
-import { getStoredUser, canModifyEthicalWall, isFinance } from '../../lib/auth';
+import { getStoredUser, isFinance } from '../../lib/auth';
 import {
   CASE_STAGES,
   CaseRecord,
@@ -178,9 +178,9 @@ export const CaseDetailView: React.FC = () => {
     return (
       <div className="py-20 text-center space-y-3">
         <ShieldAlert className="w-8 h-8 text-rose-500 mx-auto" />
-        <h3 className="font-bold text-slate-800 dark:text-slate-200">Matter Restricted or Not Found</h3>
+        <h3 className="font-bold text-slate-800 dark:text-slate-200">Matter Not Found</h3>
         <p className="text-xs text-slate-500">
-          This matter does not exist, or is protected by an active Ethical Wall.
+          This court case does not exist or has been removed.
         </p>
         <button
           onClick={() => navigate('/cases')}
@@ -198,19 +198,6 @@ export const CaseDetailView: React.FC = () => {
       loadCase();
     } catch (e: any) {
       alert(`Could not update stage: ${e.message}`);
-    }
-  };
-
-  const handleToggleEthicalWall = async () => {
-    if (!canModifyEthicalWall(currentUser)) {
-      alert('Interns and Finance cannot modify ethical wall settings.');
-      return;
-    }
-    try {
-      await updateCase(theCase.id, { ethical_wall: !theCase.ethical_wall });
-      loadCase();
-    } catch (e: any) {
-      alert(`Could not toggle ethical wall: ${e.message}`);
     }
   };
 
@@ -392,7 +379,7 @@ export const CaseDetailView: React.FC = () => {
             </div>
           </div>
 
-          {/* Action buttons & Ethical wall */}
+          {/* Action buttons */}
           <div className="flex flex-wrap items-center gap-2.5">
             {/* Stage Selector */}
             <div className="flex items-center gap-1.5 text-xs">
@@ -409,34 +396,6 @@ export const CaseDetailView: React.FC = () => {
                 ))}
               </select>
             </div>
-
-            {/* Ethical Wall Toggle */}
-            <button
-              type="button"
-              onClick={handleToggleEthicalWall}
-              title={
-                theCase.ethical_wall
-                  ? 'Ethical Wall Active: Restricted access to team members only'
-                  : 'Click to enable Ethical Wall restriction'
-              }
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition ${
-                theCase.ethical_wall
-                  ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              {theCase.ethical_wall ? (
-                <>
-                  <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Ethical Wall ON</span>
-                </>
-              ) : (
-                <>
-                  <Shield className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Ethical Wall OFF</span>
-                </>
-              )}
-            </button>
 
             {/* Update Hearing Action */}
             <button

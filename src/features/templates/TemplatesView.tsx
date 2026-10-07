@@ -18,9 +18,6 @@ import {
   fetchTemplates,
   createTemplate,
   fetchClients,
-  createClient,
-  fetchProjectCodes,
-  createProjectCode,
   createAgreement,
   addAgreementVersion,
   fetchProfiles,
@@ -133,18 +130,10 @@ export const TemplatesView: React.FC = () => {
       if (!startProjectCode) throw new Error('Please enter a project code');
       if (!startTitle) throw new Error('Please enter an agreement title');
 
-      // 1. Create or get Project Code
-      const projectCode = await createProjectCode({
-        code: startProjectCode.trim().toUpperCase(),
-        clientId: startClientId,
-        department: 'AGREEMENT',
-        title: startTitle,
-        leadAssigneeId: startLeadId || null,
-      });
-
-      // 2. Create Agreement
+      // 1. Create Agreement atomically
       const newAgr = await createAgreement({
-        projectCodeId: projectCode.id,
+        projectCode: startProjectCode.trim().toUpperCase(),
+        clientId: startClientId,
         agreementType: startFromTemplateModal.agreement_type,
         title: startTitle,
         stage: 'DRAFTING',

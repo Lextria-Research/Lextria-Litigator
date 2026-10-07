@@ -174,11 +174,6 @@ export function isSuperAdmin(user: UserProfile | null): boolean {
   return user?.role === 'SUPER_ADMIN';
 }
 
-export function canModifyEthicalWall(user: UserProfile | null): boolean {
-  const role = getEffectiveRole(user);
-  return role !== 'INTERN' && role !== 'FINANCE';
-}
-
 export function canDeleteCases(user: UserProfile | null): boolean {
   const role = getEffectiveRole(user);
   return role !== 'INTERN' && role !== 'FINANCE';

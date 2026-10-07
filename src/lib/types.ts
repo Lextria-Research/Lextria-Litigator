@@ -55,7 +55,6 @@ export interface CaseRecord {
   next_hearing_date?: string | null;
   next_purpose?: string | null;
   lead_user_id?: string | null;
-  ethical_wall: boolean;
   claim_value?: number | null;
   court_fee?: number | null;
   status: 'ACTIVE' | 'CLOSED';

@@ -323,11 +323,6 @@ export const CasesListView: React.FC = () => {
                         <span className="font-semibold text-slate-900 dark:text-slate-100 group-hover:text-indigo-600 transition truncate">
                           {c.cause_title}
                         </span>
-                        {c.ethical_wall && (
-                          <span title="Ethical Wall Active (Restricted to assigned team)">
-                            <Shield className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                          </span>
-                        )}
                       </div>
                       <div className="text-[11px] text-slate-500 truncate mt-0.5">
                         Client: {c.project_code?.client?.client_name || '—'} ({c.client_role})

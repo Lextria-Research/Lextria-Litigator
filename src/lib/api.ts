@@ -53,7 +53,7 @@ export async function createClient(client: Partial<CoreClient>): Promise<CoreCli
     .insert({
       client_code: client.client_code?.toUpperCase(),
       client_name: client.client_name,
-      entity_type: client.entity_type || 'NATURAL_PERSON',
+      entity_type: client.entity_type || 'OTHER',
       email: client.email || null,
       phone: client.phone || null,
       gstin: client.gstin || null,
@@ -192,8 +192,8 @@ export async function fetchCaseById(id: string): Promise<CaseRecord> {
   return data as CaseRecord;
 }
 
-export async function createCase(params: {
-  projectCodeId: string;
+export interface CreateCaseParams {
+  projectCode: string;
   caseType: string;
   court: string;
   bench?: string;
@@ -206,101 +206,42 @@ export async function createCase(params: {
   nextHearingDate?: string;
   nextPurpose?: string;
   leadUserId?: string;
-  ethicalWall?: boolean;
   claimValue?: number;
   courtFee?: number;
-  parties?: Array<{ name: string; side: 'OURS' | 'OPPOSITE' | 'OTHER'; party_role: string }>;
-}): Promise<CaseRecord> {
-  const caseId = crypto.randomUUID();
-  const { error: caseErr } = await litigatorDb
-    .from('cases')
-    .insert({
-      id: caseId,
-      project_code_id: params.projectCodeId,
-      case_type: params.caseType,
-      court: params.court,
-      bench: params.bench || null,
-      case_number: params.caseNumber || null,
-      cnr_number: params.cnrNumber || null,
-      filing_date: params.filingDate || null,
-      cause_title: params.causeTitle,
-      client_role: params.clientRole,
-      current_stage: params.currentStage || 'Suit filed',
-      next_hearing_date: params.nextHearingDate || null,
-      next_purpose: params.nextPurpose || null,
-      lead_user_id: params.leadUserId || null,
-      ethical_wall: Boolean(params.ethicalWall),
-      claim_value: params.claimValue || null,
-      court_fee: params.courtFee || null,
-      status: 'ACTIVE',
-    });
+  oppositePartyName?: string;
+  clientId?: string;
+  newClientName?: string;
+  newClientCode?: string;
+}
 
-  if (caseErr) throw caseErr;
-
-  // Add lead to case_team
-  if (params.leadUserId) {
-    await litigatorDb.from('case_team').insert({
-      case_id: caseId,
-      user_id: params.leadUserId,
-      role_in_team: 'LEAD',
-    });
-  }
-
-  const { data: newCase } = await litigatorDb
-    .from('cases')
-    .select()
-    .eq('id', caseId)
-    .single();
-
-  // Add parties if provided
-  if (params.parties && params.parties.length > 0) {
-    for (const p of params.parties) {
-      await litigatorDb.from('case_parties').insert({
-        case_id: newCase.id,
-        name: p.name,
-        side: p.side,
-        party_role: p.party_role,
-      });
-    }
-  }
-
-  // Create initial hearing if next_hearing_date provided
-  if (params.nextHearingDate) {
-    await litigatorDb.from('hearings').insert({
-      case_id: newCase.id,
-      hearing_date: params.nextHearingDate,
-      purpose: params.nextPurpose || 'First Hearing / Notice',
-      attended_by: params.leadUserId || null,
-    });
-  }
-
-  // Record aliases
-  if (params.cnrNumber) {
-    await addProjectAlias({
-      projectCodeId: params.projectCodeId,
-      aliasType: 'CNR',
-      aliasValue: params.cnrNumber,
-    });
-  }
-  if (params.caseNumber) {
-    await addProjectAlias({
-      projectCodeId: params.projectCodeId,
-      aliasType: 'CASE_NO',
-      aliasValue: params.caseNumber,
-    });
-  }
-
-  // Write matter event: SUIT_FILED
-  await recordMatterEvent({
-    projectCodeId: params.projectCodeId,
-    eventCode: 'SUIT_FILED',
-    title: `Suit Filed: ${params.causeTitle}`,
-    detail: `Filed in ${params.court} ${params.bench ? `(${params.bench})` : ''}. Case No: ${params.caseNumber || 'Pending'}`,
-    occurredAt: params.filingDate || clock.nowISO(),
-    clientVisible: true,
+export async function createCase(params: CreateCaseParams): Promise<CaseRecord> {
+  const { data, error } = await supabase.schema('litigator').rpc('create_case', {
+    p_project_code: params.projectCode,
+    p_case_type: params.caseType,
+    p_court: params.court,
+    p_cause_title: params.causeTitle,
+    p_client_role: params.clientRole,
+    p_client_id: params.clientId || null,
+    p_new_client_name: params.newClientName || null,
+    p_new_client_code: params.newClientCode || null,
+    p_bench: params.bench || null,
+    p_case_number: params.caseNumber || null,
+    p_cnr_number: params.cnrNumber || null,
+    p_filing_date: params.filingDate || null,
+    p_current_stage: params.currentStage || 'Suit filed',
+    p_lead_user_id: params.leadUserId || null,
+    p_claim_value: params.claimValue ?? null,
+    p_court_fee: params.courtFee ?? null,
+    p_next_hearing_date: params.nextHearingDate || null,
+    p_next_purpose: params.nextPurpose || null,
+    p_opposite_party_name: params.oppositePartyName || null,
   });
 
-  return newCase as CaseRecord;
+  if (error) throw error;
+  const newCaseId = data as string;
+
+  const newCase = await fetchCaseById(newCaseId);
+  return newCase;
 }
 
 export async function updateCase(
@@ -656,10 +597,13 @@ export async function fetchAgreementById(id: string): Promise<AgreementRecord> {
   return data as AgreementRecord;
 }
 
-export async function createAgreement(params: {
-  projectCodeId: string;
+export interface CreateAgreementParams {
+  projectCode: string;
   agreementType: string;
   title: string;
+  clientId?: string;
+  newClientName?: string;
+  newClientCode?: string;
   clientSide?: string;
   stage?: AgreementStage;
   leadUserId?: string;
@@ -675,64 +619,40 @@ export async function createAgreement(params: {
   stampRef?: string;
   registrationRequired?: boolean;
   registrationNo?: string;
-  parties?: Array<{ name: string; party_role?: string; entity_type?: string }>;
-}): Promise<AgreementRecord> {
-  const agreementId = crypto.randomUUID();
-  const { error: agrErr } = await litigatorDb
-    .from('agreements')
-    .insert({
-      id: agreementId,
-      project_code_id: params.projectCodeId,
-      agreement_type: params.agreementType,
-      title: params.title,
-      client_side: params.clientSide || null,
-      stage: params.stage || 'INTAKE',
-      lead_user_id: params.leadUserId || null,
-      reviewer_user_id: params.reviewerUserId || null,
-      governing_law: params.governingLaw || null,
-      key_terms: params.keyTerms || null,
-      execution_date: params.executionDate || null,
-      effective_date: params.effectiveDate || null,
-      expiry_date: params.expiryDate || null,
-      renewal_type: params.renewalType || 'NONE',
-      notice_days: params.noticeDays || null,
-      stamp_duty: params.stampDuty || null,
-      stamp_ref: params.stampRef || null,
-      registration_required: Boolean(params.registrationRequired),
-      registration_no: params.registrationNo || null,
-    });
+  counterpartyName?: string;
+}
 
-  if (agrErr) throw agrErr;
-
-  const { data: newAgr } = await litigatorDb
-    .from('agreements')
-    .select()
-    .eq('id', agreementId)
-    .single();
-
-  // Add initial parties
-  if (params.parties && params.parties.length > 0) {
-    for (const p of params.parties) {
-      await litigatorDb.from('agreement_parties').insert({
-        agreement_id: newAgr.id,
-        name: p.name,
-        party_role: p.party_role || null,
-        entity_type: p.entity_type || null,
-      });
-    }
-  }
-
-  // Record matter event: AGR_INTAKE
-  await recordMatterEvent({
-    projectCodeId: params.projectCodeId,
-    eventCode: 'AGR_INTAKE',
-    title: `Agreement Intake: ${params.title}`,
-    detail: `Type: ${params.agreementType}. Intake logged.`,
-    occurredAt: clock.nowISO(),
-    clientVisible: true,
+export async function createAgreement(params: CreateAgreementParams): Promise<AgreementRecord> {
+  const { data, error } = await supabase.schema('litigator').rpc('create_agreement', {
+    p_project_code: params.projectCode,
+    p_agreement_type: params.agreementType,
+    p_title: params.title,
+    p_client_id: params.clientId || null,
+    p_new_client_name: params.newClientName || null,
+    p_new_client_code: params.newClientCode || null,
+    p_client_side: params.clientSide || 'FIRST_PARTY',
+    p_stage: params.stage || 'INTAKE',
+    p_lead_user_id: params.leadUserId || null,
+    p_reviewer_user_id: params.reviewerUserId || null,
+    p_governing_law: params.governingLaw || null,
+    p_key_terms: params.keyTerms || null,
+    p_execution_date: params.executionDate || null,
+    p_effective_date: params.effectiveDate || null,
+    p_expiry_date: params.expiryDate || null,
+    p_renewal_type: params.renewalType || 'NONE',
+    p_notice_days: params.noticeDays ?? null,
+    p_stamp_duty: params.stampDuty ?? null,
+    p_stamp_ref: params.stampRef || null,
+    p_registration_required: Boolean(params.registrationRequired),
+    p_registration_no: params.registrationNo || null,
+    p_counterparty_name: params.counterpartyName || null,
   });
 
-  return newAgr as AgreementRecord;
+  if (error) throw error;
+  const newAgreementId = data as string;
+
+  const newAgr = await fetchAgreementById(newAgreementId);
+  return newAgr;
 }
 
 export async function updateAgreementStage(
@@ -1004,17 +924,28 @@ export async function recordMatterEvent(params: {
   occurredAt?: string;
   actorUserId?: string;
   clientVisible?: boolean;
+  clientLabel?: string;
+  metadata?: Record<string, any>;
 }) {
   try {
+    const { data: authData } = await supabase.auth.getUser();
+    const actorId = authData?.user?.id || params.actorUserId;
+    if (!actorId) {
+      console.warn('Cannot record matter event: actor_user_id is required by RLS');
+      return;
+    }
+
     const { error } = await coreDb.from('matter_events').insert({
       project_code_id: params.projectCodeId,
       event_code: params.eventCode || null,
       title: params.title,
       detail: params.detail || null,
       occurred_at: params.occurredAt || clock.nowISO(),
-      actor_user_id: params.actorUserId || null,
+      actor_user_id: actorId,
       source_app: 'LITIGATOR',
       client_visible: params.clientVisible ?? false,
+      client_label: params.clientLabel || null,
+      metadata: params.metadata || {},
     });
     if (error) console.warn('Could not record core.matter_event:', error.message);
   } catch (e) {

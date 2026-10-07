@@ -165,7 +165,7 @@ export const IntegrationsView: React.FC = () => {
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-400">
               Schemas: <code>litigator</code>, <code>core</code>. Enforces header{' '}
-              <code>x-lextria-app: LITIGATOR</code> and ethical wall RLS.
+              <code>x-lextria-app: LITIGATOR</code> and department-based RLS.
             </p>
             {supabaseStatus && (
               <div className="text-[11px] font-mono p-2 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">

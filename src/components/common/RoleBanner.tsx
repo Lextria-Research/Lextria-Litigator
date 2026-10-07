@@ -32,7 +32,7 @@ export const RoleBanner: React.FC<RoleBannerProps> = ({ currentUser, onRoleChang
         <Shield className="w-3.5 h-3.5 text-indigo-400" />
         <span className="font-semibold text-white">Super Admin Mode</span>
         <span className="hidden sm:inline text-indigo-300">
-          (Simulate permissions and ethical wall visibility for other staff roles)
+          (Simulate permissions and visibility for other staff roles)
         </span>
       </div>
 

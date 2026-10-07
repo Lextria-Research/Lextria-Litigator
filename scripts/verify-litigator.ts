@@ -129,7 +129,7 @@ async function main() {
         code: `LIT-VERIFY-${uniqueSuffix}`,
         client_id: tempClientId,
         department: 'LITIGATION',
-        title: 'Ethical Wall Verification Matter',
+        title: 'Department Access Verification Matter',
         lead_assignee_id: user1Id,
         owning_app: 'LITIGATOR',
         status: 'ACTIVE',
@@ -140,11 +140,11 @@ async function main() {
     tempProjectCodeId = newProj.id;
 
     // -------------------------------------------------------------
-    // TEST 1: Associate creates walled case; Associate 2 cannot see it
+    // TEST 1: Department-Based Access (LITIGATION dept can see case)
     // -------------------------------------------------------------
-    console.log('\n[Test 1] Testing Ethical Wall...');
+    console.log('\n[Test 1] Testing Department-Based Access...');
 
-    // Associate 1 creates case with ethical_wall = true
+    // Associate 1 creates case
     tempCaseId = crypto.randomUUID();
     const { error: caseErr } = await lit1
       .from('cases')
@@ -153,11 +153,10 @@ async function main() {
         project_code_id: tempProjectCodeId,
         case_type: 'COMMERCIAL_SUIT',
         court: 'High Court of Delhi',
-        cause_title: `Confidential Test Suit ${uniqueSuffix}`,
+        cause_title: `Department Test Suit ${uniqueSuffix}`,
         client_role: 'PLAINTIFF',
         current_stage: 'Suit filed',
         lead_user_id: user1Id,
-        ethical_wall: true,
         status: 'ACTIVE',
       });
     if (caseErr) throw new Error(`Associate 1 failed to create case: ${caseErr.message}`);
@@ -177,22 +176,22 @@ async function main() {
     if (q1Err) throw q1Err;
     const canAssoc1See = (assoc1Cases || []).length === 1;
 
-    // Check: Associate 2 queries cases
+    // Check: Associate 2 queries cases (both in LITIGATION department, so can see)
     const { data: assoc2Cases, error: q2Err } = await lit2
       .from('cases')
       .select('id, cause_title')
       .eq('id', tempCaseId);
     if (q2Err) throw q2Err;
-    const canAssoc2See = (assoc2Cases || []).length > 0;
+    const canAssoc2See = (assoc2Cases || []).length === 1;
 
-    console.log(`  - Associate 1 can see walled case: ${canAssoc1See}`);
-    console.log(`  - Associate 2 can see walled case: ${canAssoc2See}`);
+    console.log(`  - Associate 1 can see case: ${canAssoc1See}`);
+    console.log(`  - Associate 2 can see case (department access): ${canAssoc2See}`);
 
-    if (canAssoc1See && !canAssoc2See) {
+    if (canAssoc1See && canAssoc2See) {
       test1Passed = true;
-      console.log('✓ PASS: Ethical wall enforced. Associate 2 cannot see the case.');
+      console.log('✓ PASS: Department-based access verified. Both department members can see the case.');
     } else {
-      console.error('✗ FAIL: Ethical wall policy did not isolate case from Associate 2.');
+      console.error('✗ FAIL: Department-based access failed.');
     }
 
     // -------------------------------------------------------------
@@ -411,7 +410,7 @@ async function main() {
   }
 
   console.log('\n=== Summary of Database Verification ===');
-  console.log(`Test 1 (Ethical Wall): ${test1Passed ? 'PASSED' : 'FAILED'}`);
+  console.log(`Test 1 (Department Access): ${test1Passed ? 'PASSED' : 'FAILED'}`);
   console.log(`Test 2 (Hearing Update & Events): ${test2Passed ? 'PASSED' : 'FAILED'}`);
   console.log(`Test 3 (Agreement Stage Validation): ${test3Passed ? 'PASSED' : 'FAILED'}`);
 

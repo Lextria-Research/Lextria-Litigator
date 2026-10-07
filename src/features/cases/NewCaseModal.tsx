@@ -1,10 +1,8 @@
 // src/features/cases/NewCaseModal.tsx
 import React, { useState, useEffect } from 'react';
-import { X, Plus, ShieldAlert, Check, AlertCircle } from 'lucide-react';
+import { X, Plus, Check, AlertCircle } from 'lucide-react';
 import {
   fetchClients,
-  createClient,
-  createProjectCode,
   createCase,
   fetchProfiles,
 } from '../../lib/api';
@@ -41,7 +39,6 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
   const [clientRole, setClientRole] = useState<ClientRole>('PLAINTIFF');
   const [currentStage, setCurrentStage] = useState('Suit filed');
   const [leadUserId, setLeadUserId] = useState('');
-  const [ethicalWall, setEthicalWall] = useState(false);
   const [claimValue, setClaimValue] = useState<number | ''>('');
   const [courtFee, setCourtFee] = useState<number | ''>('');
 
@@ -90,51 +87,14 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
     setError(null);
 
     try {
-      let finalClientId = clientId;
-
-      // 1. If creating client inline
       if (creatingClient) {
         if (!newClientName.trim() || !newClientCode.trim()) {
           throw new Error('Please provide both Client Name and Client Code.');
         }
-        const createdClient = await createClient({
-          client_name: newClientName.trim(),
-          client_code: newClientCode.trim().toUpperCase(),
-          entity_type: 'LARGE_ENTITY',
-        });
-        finalClientId = createdClient.id;
       }
 
-      // 2. Create project code in core.project_codes
-      const newProj = await createProjectCode({
-        code: projectCode.trim().toUpperCase(),
-        clientId: finalClientId,
-        department: 'LITIGATION',
-        title: causeTitle.trim(),
-        leadAssigneeId: leadUserId || null,
-      });
-
-      // 3. Prepare initial parties
-      const clientObj = clients.find((c) => c.id === finalClientId);
-      const ourPartyName = clientObj ? clientObj.client_name : 'Our Client';
-      const initialParties: Array<{ name: string; side: 'OURS' | 'OPPOSITE' | 'OTHER'; party_role: string }> = [
-        {
-          name: ourPartyName,
-          side: 'OURS',
-          party_role: clientRole,
-        },
-      ];
-      if (oppositePartyName.trim()) {
-        initialParties.push({
-          name: oppositePartyName.trim(),
-          side: 'OPPOSITE' as const,
-          party_role: clientRole === 'PLAINTIFF' ? 'DEFENDANT' : 'PLAINTIFF',
-        });
-      }
-
-      // 4. Create case in litigator.cases
       const createdCase = await createCase({
-        projectCodeId: newProj.id,
+        projectCode: projectCode.trim().toUpperCase(),
         caseType,
         court: court.trim(),
         bench: bench.trim() || undefined,
@@ -147,10 +107,12 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
         nextHearingDate: nextHearingDate || undefined,
         nextPurpose: nextPurpose || undefined,
         leadUserId: leadUserId || undefined,
-        ethicalWall,
         claimValue: claimValue ? Number(claimValue) : undefined,
         courtFee: courtFee ? Number(courtFee) : undefined,
-        parties: initialParties,
+        oppositePartyName: oppositePartyName.trim() || undefined,
+        clientId: creatingClient ? undefined : clientId,
+        newClientName: creatingClient ? newClientName.trim() : undefined,
+        newClientCode: creatingClient ? newClientCode.trim().toUpperCase() : undefined,
       });
 
       onSuccess(createdCase.id);
@@ -471,27 +433,6 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
                 <option value="Judgment">Judgment</option>
               </select>
             </div>
-          </div>
-
-          {/* Ethical Wall Toggle */}
-          <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-              <div>
-                <div className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                  Ethical Wall Restriction
-                </div>
-                <div className="text-[11px] text-amber-700 dark:text-amber-400">
-                  When enabled, this matter is hidden from unauthorized staff and visible only to assigned team members.
-                </div>
-              </div>
-            </div>
-            <input
-              type="checkbox"
-              checked={ethicalWall}
-              onChange={(e) => setEthicalWall(e.target.checked)}
-              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
-            />
           </div>
 
           {/* Initial Next Hearing */}

@@ -3,8 +3,6 @@ import React, { useState, useEffect } from 'react';
 import { X, Plus, Check, AlertCircle } from 'lucide-react';
 import {
   fetchClients,
-  createClient,
-  createProjectCode,
   createAgreement,
   addAgreementVersion,
   fetchProfiles,
@@ -84,52 +82,19 @@ export const NewAgreementModal: React.FC<NewAgreementModalProps> = ({
     setError(null);
 
     try {
-      let finalClientId = clientId;
-
       if (creatingClient) {
         if (!newClientName.trim() || !newClientCode.trim()) {
           throw new Error('Please enter Client Name and unique Client Code.');
         }
-        const createdClient = await createClient({
-          client_name: newClientName.trim(),
-          client_code: newClientCode.trim().toUpperCase(),
-          entity_type: 'LARGE_ENTITY',
-        });
-        finalClientId = createdClient.id;
       }
 
-      // 1. Create project code in core.project_codes
-      const newProj = await createProjectCode({
-        code: projectCode.trim().toUpperCase(),
-        clientId: finalClientId,
-        department: 'AGREEMENT',
-        title: title.trim(),
-        leadAssigneeId: leadUserId || null,
-      });
-
-      // 2. Prepare parties
-      const clientObj = clients.find((c) => c.id === finalClientId);
-      const ourClientName = clientObj ? clientObj.client_name : 'Our Client';
-      const initialParties = [
-        {
-          name: ourClientName,
-          party_role: clientSide || 'First Party',
-          entity_type: 'CLIENT',
-        },
-      ];
-      if (counterpartyName.trim()) {
-        initialParties.push({
-          name: counterpartyName.trim(),
-          party_role: 'Second Party / Counterparty',
-          entity_type: 'COUNTERPARTY',
-        });
-      }
-
-      // 3. Create agreement
       const createdAgr = await createAgreement({
-        projectCodeId: newProj.id,
+        projectCode: projectCode.trim().toUpperCase(),
         agreementType,
         title: title.trim(),
+        clientId: creatingClient ? undefined : clientId,
+        newClientName: creatingClient ? newClientName.trim() : undefined,
+        newClientCode: creatingClient ? newClientCode.trim().toUpperCase() : undefined,
         clientSide: clientSide || undefined,
         leadUserId: leadUserId || undefined,
         reviewerUserId: reviewerUserId || undefined,
@@ -138,7 +103,7 @@ export const NewAgreementModal: React.FC<NewAgreementModalProps> = ({
         expiryDate: expiryDate || undefined,
         renewalType,
         noticeDays: noticeDays ? Number(noticeDays) : undefined,
-        parties: initialParties,
+        counterpartyName: counterpartyName.trim() || undefined,
       });
 
       // 4. If started from a template, copy template as Version 1
