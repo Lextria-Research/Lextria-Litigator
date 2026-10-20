@@ -36,7 +36,7 @@ export const App: React.FC = () => {
             <Route path="calendar" element={<CalendarView />} />
             <Route path="cases" element={<CasesListView />} />
             <Route path="cases/:id" element={<CaseDetailView />} />
-            <Route path="cause-list" element={<DailyCauseListView />} />
+            <Route path="cause-list" element={<Navigate to="/cases" replace />} />
             <Route path="agreements" element={<AgreementsKanbanView />} />
             <Route path="agreements/:id" element={<AgreementDetailView />} />
             <Route path="renewals" element={<RenewalsView />} />

@@ -19,6 +19,9 @@ import {
   Upload,
   AlertCircle,
   EyeOff,
+  MessageSquare,
+  Coins,
+  Edit2,
 } from 'lucide-react';
 import {
   fetchCaseById,
@@ -36,6 +39,9 @@ import {
   fetchProfiles,
   createOrder,
   createParty,
+  fetchClientNotes,
+  createClientNote,
+  saveCaseQuotation,
 } from '../../lib/api';
 import { clock } from '../../lib/clock';
 import { formatINR, formatINRShort } from '../../lib/currency';
@@ -45,7 +51,7 @@ import {
   getDocumentUrl,
   LITIGATION_FILE_CATEGORIES,
 } from '../../lib/files';
-import { getStoredUser, isFinance } from '../../lib/auth';
+import { getStoredUser, isFinance, isSuperAdminOrFinance } from '../../lib/auth';
 import {
   CASE_STAGES,
   CaseRecord,
@@ -53,6 +59,7 @@ import {
   OrderRecord,
   CasePartyRecord,
   InternalNoteRecord,
+  ClientNoteRecord,
   LinkedIPRecord,
   DeadlineRecord,
   CoreMatterEvent,
@@ -62,24 +69,26 @@ import {
 import { UpdateHearingModal } from './UpdateHearingModal';
 
 type TabKey =
+  | 'timeline'
+  | 'parties'
+  | 'deadlines'
   | 'hearings'
   | 'orders'
-  | 'deadlines'
-  | 'parties'
-  | 'documents'
-  | 'linked_ip'
   | 'notes'
-  | 'timeline';
+  | 'client_notes'
+  | 'documents'
+  | 'linked_ip';
 
 export const CaseDetailView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const currentUser = getStoredUser();
+  const canViewQuotation = isSuperAdminOrFinance(currentUser);
 
   const [theCase, setTheCase] = useState<CaseRecord | null>(null);
   const [profiles, setProfiles] = useState<CoreProfile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabKey>('hearings');
+  const [activeTab, setActiveTab] = useState<TabKey>('timeline');
 
   // Sub-entity data states
   const [hearings, setHearings] = useState<HearingRecord[]>([]);
@@ -89,6 +98,7 @@ export const CaseDetailView: React.FC = () => {
   const [documents, setDocuments] = useState<CoreDocument[]>([]);
   const [linkedIp, setLinkedIp] = useState<LinkedIPRecord[]>([]);
   const [notes, setNotes] = useState<InternalNoteRecord[]>([]);
+  const [clientNotes, setClientNotes] = useState<ClientNoteRecord[]>([]);
   const [timeline, setTimeline] = useState<CoreMatterEvent[]>([]);
 
   // Update hearing modal state
@@ -98,6 +108,17 @@ export const CaseDetailView: React.FC = () => {
   // Quick form states
   const [newNoteText, setNewNoteText] = useState('');
   const [addingNote, setAddingNote] = useState(false);
+
+  // Client notes form states
+  const [newClientNoteTitle, setNewClientNoteTitle] = useState('');
+  const [newClientNoteText, setNewClientNoteText] = useState('');
+  const [addingClientNote, setAddingClientNote] = useState(false);
+
+  // Quotation edit modal
+  const [quoteModalOpen, setQuoteModalOpen] = useState(false);
+  const [editingQuoteAmount, setEditingQuoteAmount] = useState<number | ''>('');
+  const [editingQuoteNumber, setEditingQuoteNumber] = useState('');
+  const [savingQuote, setSavingQuote] = useState(false);
 
   // New Deadline inline
   const [newDlTitle, setNewDlTitle] = useState('');
@@ -146,12 +167,14 @@ export const CaseDetailView: React.FC = () => {
       setProfiles(profs);
 
       if (c.project_code_id) {
-        const [docs, events] = await Promise.all([
+        const [docs, events, cNotes] = await Promise.all([
           fetchProjectDocuments(c.project_code_id),
           fetchMatterEvents(c.project_code_id),
+          fetchClientNotes(c.project_code_id),
         ]);
         setDocuments(docs);
         setTimeline(events);
+        setClientNotes(cNotes);
       }
 
       // Load internal notes only if not finance
@@ -318,6 +341,158 @@ export const CaseDetailView: React.FC = () => {
     window.open(url, '_blank');
   };
 
+  const handleSaveQuotation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!theCase?.project_code_id) return;
+    setSavingQuote(true);
+    try {
+      await saveCaseQuotation({
+        projectCodeId: theCase.project_code_id,
+        clientId: theCase.project_code?.client_id || undefined,
+        totalProfFee: Number(editingQuoteAmount) || 0,
+        quoteNumber: editingQuoteNumber.trim() || undefined,
+      });
+      setQuoteModalOpen(false);
+      loadCase();
+    } catch (err: any) {
+      alert(`Could not save quotation: ${err.message}`);
+    } finally {
+      setSavingQuote(false);
+    }
+  };
+
+  const handleAddClientNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newClientNoteText.trim() || !theCase?.project_code_id) return;
+    setAddingClientNote(true);
+    try {
+      const formattedNote = newClientNoteTitle.trim()
+        ? `[${newClientNoteTitle.trim()}] ${newClientNoteText.trim()}`
+        : newClientNoteText.trim();
+      await createClientNote({
+        projectCodeId: theCase.project_code_id,
+        note: formattedNote,
+        authorId: currentUser?.id || '',
+      });
+      setNewClientNoteText('');
+      setNewClientNoteTitle('');
+      const updated = await fetchClientNotes(theCase.project_code_id);
+      setClientNotes(updated);
+    } catch (err: any) {
+      alert(`Could not save client note: ${err.message}`);
+    } finally {
+      setAddingClientNote(false);
+    }
+  };
+
+  // Master Timeline: Only actual progressed case dates (hearings, orders, filing if set, completed deadlines).
+  // Strictly zero entry dates or database insertion timestamps.
+  const progressEvents = React.useMemo(() => {
+    if (!theCase) return [];
+    const events: {
+      id: string;
+      date: string;
+      title: string;
+      detail?: string | null;
+      category: 'FILING' | 'HEARING' | 'ORDER' | 'DEADLINE' | 'MILESTONE';
+      badge: string;
+      badgeColor: string;
+      actor?: string | null;
+    }[] = [];
+
+    // 1. Filing Date: ONLY if explicitly set and non-empty. Never default to entry date.
+    if (theCase.filing_date && theCase.filing_date.trim()) {
+      events.push({
+        id: `filing-${theCase.id}`,
+        date: theCase.filing_date,
+        title: 'Case / Suit Filed in Court',
+        detail: `${theCase.cause_title} formally instituted before ${theCase.court}${theCase.bench ? ` (${theCase.bench})` : ''}. Case Type: ${theCase.case_type.replace(/_/g, ' ')}${theCase.case_number ? ` • Case No: ${theCase.case_number}` : ''}`,
+        category: 'FILING',
+        badge: 'CASE FILED',
+        badgeColor: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800',
+        actor: theCase.lead_user?.display_name,
+      });
+    }
+
+    // 2. Hearings Progressed: by hearing_date
+    hearings.forEach((h) => {
+      if (!h.hearing_date) return;
+      events.push({
+        id: `hearing-${h.id}`,
+        date: h.hearing_date,
+        title: `Court Hearing: ${h.purpose || 'Proceedings'}`,
+        detail: h.outcome
+          ? `Outcome: ${h.outcome}${h.next_date ? ` (Next hearing scheduled: ${clock.formatDisplay(h.next_date)})` : ''}`
+          : `Hearing scheduled${h.next_purpose ? ` for ${h.next_purpose}` : ''}. Outcome pending record.`,
+        category: 'HEARING',
+        badge: h.outcome ? 'HEARING COMPLETED' : 'HEARING SCHEDULED',
+        badgeColor: h.outcome
+          ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800'
+          : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800',
+        actor: h.attending_profile?.display_name,
+      });
+    });
+
+    // 3. Orders Passed: by order_date
+    orders.forEach((ord) => {
+      if (!ord.order_date) return;
+      events.push({
+        id: `order-${ord.id}`,
+        date: ord.order_date,
+        title: `Court Order Passed: ${ord.order_type}`,
+        detail: ord.summary,
+        category: 'ORDER',
+        badge: 'COURT ORDER',
+        badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800',
+        actor: ord.compliance_owner_profile?.display_name,
+      });
+    });
+
+    // 4. Completed Statutory Deadlines: by due_date
+    deadlines
+      .filter((dl) => dl.status === 'DONE' && dl.due_date)
+      .forEach((dl) => {
+        events.push({
+          id: `deadline-${dl.id}`,
+          date: dl.due_date,
+          title: `Statutory Deadline Met: ${dl.title}`,
+          detail: `Type: ${dl.deadline_type}. Owner: ${dl.owner_profile?.display_name || 'Assigned Counsel'}`,
+          category: 'DEADLINE',
+          badge: 'COMPLIANCE MET',
+          badgeColor: 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950 dark:text-purple-300 dark:border-purple-800',
+          actor: dl.owner_profile?.display_name,
+        });
+      });
+
+    // 5. Genuine cross-app progress milestones (filter out synthetic case creation / entry events)
+    timeline.forEach((ev) => {
+      if (
+        ev.event_code === 'CASE_CREATED' ||
+        ev.event_code === 'ENTRY_CREATED' ||
+        ev.event_code === 'SUIT_FILED' ||
+        ev.title?.toLowerCase().includes('created') ||
+        ev.title?.toLowerCase().includes('docket created')
+      ) {
+        return;
+      }
+      if (ev.occurred_at) {
+        events.push({
+          id: `timeline-${ev.id}`,
+          date: ev.occurred_at,
+          title: ev.title,
+          detail: ev.detail,
+          category: 'MILESTONE',
+          badge: ev.event_code || ev.source_app || 'PROGRESS',
+          badgeColor: 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+          actor: ev.actor_profile?.display_name,
+        });
+      }
+    });
+
+    // Sort strictly descending by actual progress date
+    return events.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
+  }, [theCase, hearings, orders, deadlines, timeline]);
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       {/* Back button */}
@@ -401,7 +576,8 @@ export const CaseDetailView: React.FC = () => {
             <button
               type="button"
               onClick={() => {
-                setTargetHearing(null);
+                const upcoming = hearings.find((h) => h.hearing_date === theCase.next_hearing_date);
+                setTargetHearing(upcoming || null);
                 setUpdateHearingOpen(true);
               }}
               className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm shadow-indigo-600/30 transition"
@@ -413,47 +589,91 @@ export const CaseDetailView: React.FC = () => {
         </div>
 
         {/* Quick Metrics Bar */}
-        <div className="pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+        <div className={`pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 ${canViewQuotation ? 'sm:grid-cols-3 lg:grid-cols-5' : 'sm:grid-cols-4'} gap-4 text-xs`}>
           <div>
             <div className="text-[10px] text-slate-400 uppercase font-bold">Next Hearing</div>
             <div className="font-semibold text-slate-800 dark:text-slate-200">
-              {clock.formatDisplay(theCase.next_hearing_date)} {theCase.next_purpose ? `(${theCase.next_purpose})` : ''}
+              {theCase.next_hearing_date ? (
+                <span>
+                  {clock.formatDisplay(theCase.next_hearing_date)} {theCase.next_purpose ? `(${theCase.next_purpose})` : ''}
+                </span>
+              ) : (
+                <span className="text-slate-400 font-normal">Date not fixed</span>
+              )}
             </div>
           </div>
           <div>
             <div className="text-[10px] text-slate-400 uppercase font-bold">Filing Date</div>
             <div className="font-semibold text-slate-800 dark:text-slate-200">
-              {clock.formatDisplay(theCase.filing_date)}
+              {theCase.filing_date ? (
+                clock.formatDisplay(theCase.filing_date)
+              ) : (
+                <span className="text-slate-400 font-normal">Not recorded</span>
+              )}
             </div>
           </div>
           <div>
             <div className="text-[10px] text-slate-400 uppercase font-bold">Claim Value</div>
             <div className="font-semibold text-slate-800 dark:text-slate-200">
-              {formatINR(theCase.claim_value)}
+              {theCase.claim_value ? formatINR(theCase.claim_value) : <span className="text-slate-400 font-normal">—</span>}
             </div>
           </div>
           <div>
             <div className="text-[10px] text-slate-400 uppercase font-bold">Court Fee Paid</div>
             <div className="font-semibold text-slate-800 dark:text-slate-200">
-              {formatINR(theCase.court_fee)}
+              {theCase.court_fee ? formatINR(theCase.court_fee) : <span className="text-slate-400 font-normal">—</span>}
             </div>
           </div>
+          {canViewQuotation && (
+            <div>
+              <div className="text-[10px] text-amber-600 dark:text-amber-400 uppercase font-bold flex items-center justify-between">
+                <span>Quotation / Fee</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingQuoteAmount(theCase.quotation?.total_prof_fee ?? theCase.quotation_amount ?? '');
+                    setEditingQuoteNumber(theCase.quotation?.quote_number ?? theCase.quotation_number ?? '');
+                    setQuoteModalOpen(true);
+                  }}
+                  className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline capitalize font-semibold flex items-center gap-0.5"
+                >
+                  <Edit2 className="w-2.5 h-2.5" />
+                  <span>{theCase.quotation || theCase.quotation_amount ? 'Edit' : '+ Set'}</span>
+                </button>
+              </div>
+              <div className="font-semibold text-slate-800 dark:text-slate-200 font-mono">
+                {theCase.quotation ? (
+                  <span>
+                    {formatINR(theCase.quotation.total_prof_fee)}{' '}
+                    <span className="text-[10px] text-slate-400 font-normal">
+                      ({theCase.quotation.quote_number || 'Quote'} • {theCase.quotation.status})
+                    </span>
+                  </span>
+                ) : theCase.quotation_amount ? (
+                  <span>{formatINR(theCase.quotation_amount)}</span>
+                ) : (
+                  <span className="text-slate-400 text-xs font-normal">Not quoted</span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Tabs Navigation */}
       <div className="border-b border-slate-200 dark:border-slate-800 flex items-center gap-2 overflow-x-auto pb-px">
         {[
+          { key: 'timeline', label: `Master Timeline (${progressEvents.length})`, icon: History },
+          { key: 'parties', label: `Parties (${parties.length})`, icon: Users },
+          { key: 'deadlines', label: `Deadlines (${deadlines.length})`, icon: Clock },
           { key: 'hearings', label: `Hearings (${hearings.length})`, icon: Calendar },
           { key: 'orders', label: `Orders (${orders.length})`, icon: Scale },
-          { key: 'deadlines', label: `Deadlines (${deadlines.length})`, icon: Clock },
-          { key: 'parties', label: `Parties (${parties.length})`, icon: Users },
-          { key: 'documents', label: `Document Vault (${documents.length})`, icon: FolderLock },
-          { key: 'linked_ip', label: `Linked IP (${linkedIp.length})`, icon: LinkIcon },
           ...(!isFinance(currentUser)
             ? [{ key: 'notes', label: `Internal Notes (${notes.length})`, icon: FileText }]
             : []),
-          { key: 'timeline', label: `Matter Timeline (${timeline.length})`, icon: History },
+          { key: 'client_notes', label: `Client Notes (${clientNotes.length})`, icon: MessageSquare },
+          { key: 'documents', label: `Document Vault (${documents.length})`, icon: FolderLock },
+          { key: 'linked_ip', label: `Linked IP (${linkedIp.length})`, icon: LinkIcon },
         ].map((tab) => (
           <button
             key={tab.key}
@@ -470,73 +690,63 @@ export const CaseDetailView: React.FC = () => {
         ))}
       </div>
 
-      {/* TAB 1: HEARINGS */}
-      {activeTab === 'hearings' && (
+      {/* TAB 1: MASTER TIMELINE (Actual progressed case dates only) */}
+      {activeTab === 'timeline' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-              Proceedings &amp; Daily Hearing Diary
-            </h3>
-            <button
-              onClick={() => {
-                setTargetHearing(null);
-                setUpdateHearingOpen(true);
-              }}
-              className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition flex items-center gap-1.5"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Log Hearing Outcome</span>
-            </button>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div>
+              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                Master Case Trajectory &amp; Progression Timeline
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Chronological record of actual court hearings, judicial orders, and filing progression ({progressEvents.length} milestones)
+              </p>
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">
+              Progress Dates Only • Entry Dates Excluded
+            </div>
           </div>
 
-          {hearings.length === 0 ? (
-            <div className="py-12 text-center text-xs text-slate-400">
-              No hearings logged yet. Use "Update Hearing" to record court appearances.
+          {progressEvents.length === 0 ? (
+            <div className="py-12 text-center space-y-2">
+              <History className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto" />
+              <div className="font-semibold text-xs text-slate-700 dark:text-slate-300">
+                No Case Progress Dates Logged Yet
+              </div>
+              <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                Timeline records actual court hearings, judicial orders, and formal filing dates as proceedings advance.
+              </p>
             </div>
           ) : (
-            <div className="space-y-3">
-              {hearings.map((h) => (
-                <div
-                  key={h.id}
-                  className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-2"
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                        <span>{clock.formatDisplay(h.hearing_date)}</span>
-                        <span className="font-normal text-slate-500">• {h.purpose}</span>
+            <div className="relative pl-6 space-y-5 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200 dark:before:bg-slate-800">
+              {progressEvents.map((ev) => (
+                <div key={ev.id} className="relative group">
+                  <div className="absolute -left-6 top-1.5 w-2.5 h-2.5 rounded-full bg-indigo-600 ring-4 ring-white dark:ring-slate-900 group-hover:scale-125 transition" />
+                  <div className="p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20 hover:border-indigo-200 dark:hover:border-indigo-800 transition space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs text-slate-900 dark:text-slate-100">
+                          {ev.title}
+                        </span>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${ev.badgeColor}`}>
+                          {ev.badge}
+                        </span>
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">
-                        Attended by: {h.attending_profile?.display_name || 'Unrecorded'}
+                      <div className="font-bold text-xs text-indigo-600 dark:text-indigo-400 font-mono">
+                        {clock.formatDisplay(ev.date)}
                       </div>
                     </div>
-                    {h.next_date && (
-                      <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded">
-                        Next Date: {clock.formatDisplay(h.next_date)} ({h.next_purpose || 'Orders'})
-                      </span>
+                    {ev.detail && (
+                      <p className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap">
+                        {ev.detail}
+                      </p>
+                    )}
+                    {ev.actor && (
+                      <div className="text-[10px] text-slate-400 pt-0.5">
+                        Recorded / Attended by: <span className="font-medium text-slate-600 dark:text-slate-300">{ev.actor}</span>
+                      </div>
                     )}
                   </div>
-
-                  {h.outcome ? (
-                    <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-700/60 rounded-lg text-xs text-slate-700 dark:text-slate-300">
-                      {h.outcome}
-                    </div>
-                  ) : (
-                    <div className="text-xs text-amber-600 flex items-center gap-1">
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      <span>Outcome pending record</span>
-                    </div>
-                  )}
-
-                  {h.order_document && (
-                    <button
-                      onClick={() => openDocument(h.order_document as CoreDocument)}
-                      className="text-xs font-semibold text-indigo-600 hover:underline flex items-center gap-1 pt-1"
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                      <span>View Attached Daily Order</span>
-                    </button>
-                  )}
                 </div>
               ))}
             </div>
@@ -544,47 +754,84 @@ export const CaseDetailView: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 2: ORDERS */}
-      {activeTab === 'orders' && (
+      {/* TAB 2: PARTIES */}
+      {activeTab === 'parties' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
             <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-              Court Orders &amp; Compliance Register
+              Parties to Litigation &amp; Opposing Counsel
             </h3>
           </div>
 
-          {orders.length === 0 ? (
-            <div className="py-12 text-center text-xs text-slate-400">
-              No orders logged for this matter.
+          {/* Add Party Inline Form */}
+          <form onSubmit={handleAddParty} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-3">
+            <div className="text-xs font-bold text-slate-700 dark:text-slate-300">Add Party</div>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+              <input
+                type="text"
+                required
+                value={newPartyName}
+                onChange={(e) => setNewPartyName(e.target.value)}
+                placeholder="Party Name"
+                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
+              />
+              <select
+                value={newPartySide}
+                onChange={(e) => setNewPartySide(e.target.value as any)}
+                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
+              >
+                <option value="OPPOSITE">Opposite Side</option>
+                <option value="OURS">Our Side</option>
+                <option value="OTHER">Other / Proforma</option>
+              </select>
+              <input
+                type="text"
+                required
+                value={newPartyRole}
+                onChange={(e) => setNewPartyRole(e.target.value)}
+                placeholder="Role (e.g. Defendant No. 1)"
+                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
+              />
+              <input
+                type="text"
+                value={newPartyCounsel}
+                onChange={(e) => setNewPartyCounsel(e.target.value)}
+                placeholder="Counsel Name &amp; Contact"
+                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
+              />
             </div>
-          ) : (
-            <div className="space-y-3">
-              {orders.map((ord) => (
-                <div
-                  key={ord.id}
-                  className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex items-start justify-between gap-4"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="font-bold text-slate-900 dark:text-slate-100">
-                        {clock.formatDisplay(ord.order_date)}
-                      </span>
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200">
-                        {ord.order_type}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-700 dark:text-slate-300">{ord.summary}</p>
-                    {ord.compliance_required && (
-                      <div className="text-[11px] text-purple-700 dark:text-purple-300 font-medium">
-                        Compliance Required by: {clock.formatDisplay(ord.compliance_due)} (Owner:{' '}
-                        {ord.compliance_owner_profile?.display_name || 'Assigned Lead'})
-                      </div>
-                    )}
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={addingParty}
+                className="px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
+              >
+                {addingParty ? 'Adding...' : 'Add Party'}
+              </button>
+            </div>
+          </form>
+
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {parties.map((p) => (
+              <div key={p.id} className="py-2.5 flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-xs text-slate-900 dark:text-slate-100">
+                    {p.name}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    Role: {p.party_role} {p.counsel_name ? `• Counsel: ${p.counsel_name}` : ''}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                  p.side === 'OURS'
+                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
+                    : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                }`}>
+                  {p.side}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -684,88 +931,300 @@ export const CaseDetailView: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 4: PARTIES */}
-      {activeTab === 'parties' && (
+      {/* TAB 4: HEARINGS */}
+      {activeTab === 'hearings' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
             <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-              Parties to Litigation &amp; Opposing Counsel
+              Proceedings &amp; Daily Hearing Diary
+            </h3>
+            <button
+              onClick={() => {
+                const upcoming = hearings.find((h) => h.hearing_date === theCase.next_hearing_date);
+                setTargetHearing(upcoming || null);
+                setUpdateHearingOpen(true);
+              }}
+              className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition flex items-center gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Update Hearing / Outcome</span>
+            </button>
+          </div>
+
+          {hearings.length === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-400">
+              No hearings logged yet. Use "Update Hearing" to record court appearances.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {hearings.map((h) => (
+                <div
+                  key={h.id}
+                  className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-2"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                        <span>{clock.formatDisplay(h.hearing_date)}</span>
+                        <span className="font-normal text-slate-500">• {h.purpose}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        Attended by: {h.attending_profile?.display_name || 'Unrecorded'}
+                      </div>
+                    </div>
+                    {h.next_date && (
+                      <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded">
+                        Next Date: {clock.formatDisplay(h.next_date)} ({h.next_purpose || 'Orders'})
+                      </span>
+                    )}
+                  </div>
+
+                  {h.outcome && h.outcome.trim() ? (
+                    <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-700/60 rounded-lg text-xs text-slate-700 dark:text-slate-300 flex items-start justify-between gap-3">
+                      <div className="whitespace-pre-wrap">{h.outcome}</div>
+                      <button
+                        onClick={() => {
+                          setTargetHearing(h);
+                          setUpdateHearingOpen(true);
+                        }}
+                        className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold shrink-0"
+                      >
+                        Edit Outcome
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between text-xs text-amber-600 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2 rounded-lg border border-amber-200/60 dark:border-amber-800/40">
+                      <div className="flex items-center gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span>Outcome pending record</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setTargetHearing(h);
+                          setUpdateHearingOpen(true);
+                        }}
+                        className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded transition"
+                      >
+                        Log Outcome
+                      </button>
+                    </div>
+                  )}
+
+                  {h.order_document && (
+                    <button
+                      onClick={() => openDocument(h.order_document as CoreDocument)}
+                      className="text-xs font-semibold text-indigo-600 hover:underline flex items-center gap-1 pt-1"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>View Attached Daily Order</span>
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 5: ORDERS */}
+      {activeTab === 'orders' && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+            <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+              Court Orders &amp; Compliance Register
             </h3>
           </div>
 
-          {/* Add Party Inline Form */}
-          <form onSubmit={handleAddParty} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-3">
-            <div className="text-xs font-bold text-slate-700 dark:text-slate-300">Add Party</div>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-              <input
-                type="text"
-                required
-                value={newPartyName}
-                onChange={(e) => setNewPartyName(e.target.value)}
-                placeholder="Party Name"
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
-              />
-              <select
-                value={newPartySide}
-                onChange={(e) => setNewPartySide(e.target.value as any)}
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
-              >
-                <option value="OPPOSITE">Opposite Side</option>
-                <option value="OURS">Our Side</option>
-                <option value="OTHER">Other / Proforma</option>
-              </select>
-              <input
-                type="text"
-                required
-                value={newPartyRole}
-                onChange={(e) => setNewPartyRole(e.target.value)}
-                placeholder="Role (e.g. Defendant No. 1)"
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
-              />
-              <input
-                type="text"
-                value={newPartyCounsel}
-                onChange={(e) => setNewPartyCounsel(e.target.value)}
-                placeholder="Counsel Name &amp; Contact"
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
-              />
+          {orders.length === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-400">
+              No orders logged for this matter.
             </div>
+          ) : (
+            <div className="space-y-3">
+              {orders.map((ord) => (
+                <div
+                  key={ord.id}
+                  className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex items-start justify-between gap-4"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="font-bold text-slate-900 dark:text-slate-100">
+                        {clock.formatDisplay(ord.order_date)}
+                      </span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200">
+                        {ord.order_type}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-700 dark:text-slate-300">{ord.summary}</p>
+                    {ord.compliance_required && (
+                      <div className="text-[11px] text-purple-700 dark:text-purple-300 font-medium">
+                        Compliance Required by: {clock.formatDisplay(ord.compliance_due)} (Owner:{' '}
+                        {ord.compliance_owner_profile?.display_name || 'Assigned Lead'})
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 6: INTERNAL NOTES */}
+      {activeTab === 'notes' && !isFinance(currentUser) && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div>
+              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                Privileged Counsel Notes
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Confidential strategist thoughts (RLS protected; never visible to Finance or clients)
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleAddNote} className="space-y-2">
+            <textarea
+              required
+              rows={3}
+              value={newNoteText}
+              onChange={(e) => setNewNoteText(e.target.value)}
+              placeholder="Record privileged trial strategies, witness assessments, or bench observations..."
+              className="w-full p-3 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
+            />
             <div className="flex justify-end">
               <button
                 type="submit"
-                disabled={addingParty}
-                className="px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
+                disabled={addingNote}
+                className="px-4 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
               >
-                {addingParty ? 'Adding...' : 'Add Party'}
+                {addingNote ? 'Saving Note...' : 'Save Privileged Note'}
               </button>
             </div>
           </form>
 
-          <div className="divide-y divide-slate-100 dark:divide-slate-800">
-            {parties.map((p) => (
-              <div key={p.id} className="py-2.5 flex items-center justify-between">
-                <div>
-                  <div className="font-semibold text-xs text-slate-900 dark:text-slate-100">
-                    {p.name}
-                  </div>
-                  <div className="text-[11px] text-slate-500">
-                    Role: {p.party_role} {p.counsel_name ? `• Counsel: ${p.counsel_name}` : ''}
-                  </div>
+          <div className="space-y-3 pt-2">
+            {notes.map((n) => (
+              <div
+                key={n.id}
+                className="p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-1"
+              >
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                    {n.author_profile?.display_name || 'Counsel'}
+                  </span>
+                  <span>{clock.formatDisplay(n.created_at)}</span>
                 </div>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                  p.side === 'OURS'
-                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
-                    : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                }`}>
-                  {p.side}
-                </span>
+                <p className="text-xs text-slate-800 dark:text-slate-200 whitespace-pre-wrap">{n.note}</p>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* TAB 5: DOCUMENT VAULT */}
+      {/* TAB 7: CLIENT NOTES (Future Client-Facing Portal Ready) */}
+      {activeTab === 'client_notes' && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                  Client Notes &amp; Portal Updates
+                </h3>
+                <span className="text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-full">
+                  Client-Visible Ready
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Status updates and progress messages curated specifically for the client. These notes will be visible on the client-side view of this dashboard.
+              </p>
+            </div>
+          </div>
+
+          {/* Add Client Note Form */}
+          <form onSubmit={handleAddClientNote} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 rounded-xl space-y-3">
+            <div className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+              <span>Post New Client Update</span>
+              <span className="text-[10px] text-slate-400 font-normal">
+                Will be surfaced to client portal
+              </span>
+            </div>
+            <div>
+              <input
+                type="text"
+                value={newClientNoteTitle}
+                onChange={(e) => setNewClientNoteTitle(e.target.value)}
+                placeholder="Subject / Update Title (e.g. Court arguments completed; Next date fixed)"
+                className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+              />
+            </div>
+            <div>
+              <textarea
+                required
+                rows={3}
+                value={newClientNoteText}
+                onChange={(e) => setNewClientNoteText(e.target.value)}
+                placeholder="Write plain-language client update without internal privileged counsel notes..."
+                className="w-full p-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
+              />
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={addingClientNote}
+                className="px-4 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm shadow-emerald-600/30 transition flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>{addingClientNote ? 'Publishing...' : 'Add Client Note'}</span>
+              </button>
+            </div>
+          </form>
+
+          {/* List of client notes */}
+          {clientNotes.length === 0 ? (
+            <div className="py-10 text-center space-y-1">
+              <MessageSquare className="w-7 h-7 text-slate-300 dark:text-slate-600 mx-auto" />
+              <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">No Client Notes Yet</div>
+              <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                Use the box above to publish progress briefs and status notes for the client's view.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {clientNotes.map((cn) => (
+                <div
+                  key={cn.id}
+                  className="p-4 rounded-xl border border-emerald-100 dark:border-emerald-950/60 bg-emerald-50/30 dark:bg-emerald-950/20 space-y-2"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Client Status Update</span>
+                      <span className="text-[10px] font-mono bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200 px-1.5 py-0.5 rounded">
+                        CLIENT VISIBLE
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-slate-400">
+                      {clock.formatDisplay(cn.created_at)}
+                    </span>
+                  </div>
+                  {cn.note && (
+                    <p className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+                      {cn.note}
+                    </p>
+                  )}
+                  <div className="text-[10px] text-slate-400 pt-1 border-t border-emerald-100/60 dark:border-emerald-900/40">
+                    Logged by {cn.author_profile?.display_name || 'Counsel'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 8: DOCUMENT VAULT */}
       {activeTab === 'documents' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
@@ -838,7 +1297,7 @@ export const CaseDetailView: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 6: LINKED IP */}
+      {/* TAB 9: LINKED IP */}
       {activeTab === 'linked_ip' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
@@ -912,104 +1371,67 @@ export const CaseDetailView: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 7: INTERNAL NOTES */}
-      {activeTab === 'notes' && !isFinance(currentUser) && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-            <div>
-              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-                Privileged Counsel Notes
+      {/* Quotation Edit Modal (SuperAdmin & Finance only) */}
+      {quoteModalOpen && canViewQuotation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <Coins className="w-4 h-4 text-amber-500" />
+                <span>Matter Quotation / Fee</span>
               </h3>
-              <p className="text-[11px] text-slate-500">
-                Confidential strategist thoughts (RLS protected; never visible to Finance or clients)
-              </p>
-            </div>
-          </div>
-
-          <form onSubmit={handleAddNote} className="space-y-2">
-            <textarea
-              required
-              rows={3}
-              value={newNoteText}
-              onChange={(e) => setNewNoteText(e.target.value)}
-              placeholder="Record privileged trial strategies, witness assessments, or bench observations..."
-              className="w-full p-3 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
-            />
-            <div className="flex justify-end">
               <button
-                type="submit"
-                disabled={addingNote}
-                className="px-4 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
+                onClick={() => setQuoteModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs"
               >
-                {addingNote ? 'Saving Note...' : 'Save Privileged Note'}
+                Cancel
               </button>
             </div>
-          </form>
-
-          <div className="space-y-3 pt-2">
-            {notes.map((n) => (
-              <div
-                key={n.id}
-                className="p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-1"
-              >
-                <div className="flex items-center justify-between text-[11px] text-slate-400">
-                  <span className="font-semibold text-slate-700 dark:text-slate-300">
-                    {n.author_profile?.display_name || 'Counsel'}
-                  </span>
-                  <span>{clock.formatDisplay(n.created_at)}</span>
-                </div>
-                <p className="text-xs text-slate-800 dark:text-slate-200 whitespace-pre-wrap">{n.note}</p>
+            <form onSubmit={handleSaveQuotation} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Quotation / Professional Fee (₹)
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  required
+                  value={editingQuoteAmount}
+                  onChange={(e) => setEditingQuoteAmount(e.target.value ? Number(e.target.value) : '')}
+                  placeholder="e.g. 150000"
+                  className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 font-mono"
+                />
               </div>
-            ))}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Quote Reference No.
+                </label>
+                <input
+                  type="text"
+                  value={editingQuoteNumber}
+                  onChange={(e) => setEditingQuoteNumber(e.target.value)}
+                  placeholder="Auto-generated if empty"
+                  className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 font-mono"
+                />
+              </div>
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setQuoteModalOpen(false)}
+                  className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingQuote}
+                  className="px-4 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
+                >
+                  {savingQuote ? 'Saving...' : 'Save Quotation'}
+                </button>
+              </div>
+            </form>
           </div>
-        </div>
-      )}
-
-      {/* TAB 8: MATTER TIMELINE (CROSS-APP core.matter_events) */}
-      {activeTab === 'timeline' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
-          <div className="pb-3 border-b border-slate-100 dark:border-slate-800">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-              Cross-App Matter Event History (core.matter_events)
-            </h3>
-            <p className="text-[11px] text-slate-500">
-              Automatic ledger tracking events from Litigator, Office (dispatches, notices), and Finance
-            </p>
-          </div>
-
-          {timeline.length === 0 ? (
-            <div className="py-12 text-center text-xs text-slate-400">
-              No events recorded on this matter code yet.
-            </div>
-          ) : (
-            <div className="relative pl-6 space-y-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200 dark:before:bg-slate-800">
-              {timeline.map((ev) => (
-                <div key={ev.id} className="relative">
-                  <div className="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-indigo-600 ring-4 ring-white dark:ring-slate-900" />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-xs text-slate-900 dark:text-slate-100">
-                        {ev.title}
-                      </span>
-                      {ev.event_code && (
-                        <span className="text-[10px] font-mono bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded">
-                          {ev.event_code}
-                        </span>
-                      )}
-                      <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded font-mono">
-                        {ev.source_app}
-                      </span>
-                    </div>
-                    {ev.detail && <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">{ev.detail}</p>}
-                    <div className="text-[10px] text-slate-400 mt-1">
-                      {clock.formatDisplay(ev.occurred_at)} • Logged by:{' '}
-                      {ev.actor_profile?.display_name || 'System / Staff'}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 

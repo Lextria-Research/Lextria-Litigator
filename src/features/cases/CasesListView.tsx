@@ -15,11 +15,15 @@ import {
 import { fetchCases, fetchClients, fetchProfiles } from '../../lib/api';
 import { clock } from '../../lib/clock';
 import { formatINRShort } from '../../lib/currency';
+import { getStoredUser, isSuperAdminOrFinance } from '../../lib/auth';
 import { CASE_STAGES, CaseRecord, CoreClient, CoreProfile } from '../../lib/types';
 import { NewCaseModal } from './NewCaseModal';
 
 export const CasesListView: React.FC = () => {
   const navigate = useNavigate();
+  const currentUser = getStoredUser();
+  const canViewQuotation = isSuperAdminOrFinance(currentUser);
+
   const [cases, setCases] = useState<CaseRecord[]>([]);
   const [clients, setClients] = useState<CoreClient[]>([]);
   const [profiles, setProfiles] = useState<CoreProfile[]>([]);
@@ -280,6 +284,7 @@ export const CasesListView: React.FC = () => {
                   <th className="py-3 px-4">Current Stage</th>
                   <th className="py-3 px-4">Next Hearing</th>
                   <th className="py-3 px-4">Lead Counsel</th>
+                  {canViewQuotation && <th className="py-3 px-4">Quotation</th>}
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
@@ -375,6 +380,28 @@ export const CasesListView: React.FC = () => {
                         {c.lead_user?.role.toLowerCase().replace(/_/g, ' ')}
                       </div>
                     </td>
+
+                    {/* Quotation - Visible only to Superadmin & Finance */}
+                    {canViewQuotation && (
+                      <td className="py-3.5 px-4 font-mono">
+                        {c.quotation ? (
+                          <div>
+                            <div className="font-bold text-emerald-700 dark:text-emerald-400">
+                              {formatINRShort(c.quotation.total_prof_fee)}
+                            </div>
+                            <div className="text-[10px] text-slate-400 truncate max-w-[120px]">
+                              {c.quotation.quote_number || 'Quote'} • {c.quotation.status}
+                            </div>
+                          </div>
+                        ) : c.quotation_amount ? (
+                          <div className="font-bold text-emerald-700 dark:text-emerald-400">
+                            {formatINRShort(c.quotation_amount)}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 text-[11px]">No Quote</span>
+                        )}
+                      </td>
+                    )}
 
                     {/* Action */}
                     <td className="py-3.5 px-4 text-right">

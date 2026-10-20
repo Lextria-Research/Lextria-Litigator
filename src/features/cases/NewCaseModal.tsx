@@ -7,6 +7,7 @@ import {
   fetchProfiles,
 } from '../../lib/api';
 import { clock } from '../../lib/clock';
+import { getStoredUser, isSuperAdminOrFinance } from '../../lib/auth';
 import type { CoreClient, CoreProfile, CaseType, ClientRole } from '../../lib/types';
 
 interface NewCaseModalProps {
@@ -16,6 +17,9 @@ interface NewCaseModalProps {
 }
 
 export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onSuccess }) => {
+  const currentUser = getStoredUser();
+  const canManageQuotation = isSuperAdminOrFinance(currentUser);
+
   const [clients, setClients] = useState<CoreClient[]>([]);
   const [profiles, setProfiles] = useState<CoreProfile[]>([]);
 
@@ -34,7 +38,9 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
   const [bench, setBench] = useState('');
   const [caseNumber, setCaseNumber] = useState('');
   const [cnrNumber, setCnrNumber] = useState('');
-  const [filingDate, setFilingDate] = useState(clock.todayYMD());
+  const [filingDate, setFilingDate] = useState('');
+  const [quotationAmount, setQuotationAmount] = useState<number | ''>('');
+  const [quotationNumber, setQuotationNumber] = useState('');
   const [causeTitle, setCauseTitle] = useState('');
   const [clientRole, setClientRole] = useState<ClientRole>('PLAINTIFF');
   const [currentStage, setCurrentStage] = useState('Suit filed');
@@ -100,7 +106,7 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
         bench: bench.trim() || undefined,
         caseNumber: caseNumber.trim() || undefined,
         cnrNumber: cnrNumber.trim() || undefined,
-        filingDate: filingDate || undefined,
+        filingDate: filingDate.trim() || undefined,
         causeTitle: causeTitle.trim(),
         clientRole,
         currentStage,
@@ -113,6 +119,8 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
         clientId: creatingClient ? undefined : clientId,
         newClientName: creatingClient ? newClientName.trim() : undefined,
         newClientCode: creatingClient ? newClientCode.trim().toUpperCase() : undefined,
+        quotationAmount: quotationAmount !== '' ? Number(quotationAmount) : undefined,
+        quotationNumber: quotationNumber.trim() || undefined,
       });
 
       onSuccess(createdCase.id);
@@ -322,8 +330,8 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
             </div>
           </div>
 
-          {/* Numbers: Case No & CNR */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Numbers: Case No, CNR & Date of Filing */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 Case / Suit Number
@@ -349,7 +357,60 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
                 className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 font-mono"
               />
             </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Date of Filing of Case
+              </label>
+              <input
+                type="date"
+                value={filingDate}
+                onChange={(e) => setFilingDate(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+              />
+            </div>
           </div>
+
+          {/* Quotation - Visible only to SuperAdmin & Finance */}
+          {canManageQuotation && (
+            <div className="p-3.5 bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-800/60 rounded-xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-900 dark:text-amber-200 uppercase tracking-wider">
+                  Quotation (Superadmin &amp; Finance Only)
+                </span>
+                <span className="text-[10px] text-amber-700 dark:text-amber-400 font-mono">
+                  finance.quotations
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Quotation / Professional Fee (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={quotationAmount}
+                    onChange={(e) => setQuotationAmount(e.target.value ? Number(e.target.value) : '')}
+                    placeholder="e.g. 150000"
+                    className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Quotation Reference No.
+                  </label>
+                  <input
+                    type="text"
+                    value={quotationNumber}
+                    onChange={(e) => setQuotationNumber(e.target.value)}
+                    placeholder="Auto-generated if blank (e.g. Q-2026-001)"
+                    className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Lead Counsel & Opposite Party */}
           <div className="grid grid-cols-2 gap-3">

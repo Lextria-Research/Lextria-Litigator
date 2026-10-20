@@ -22,7 +22,10 @@ import type {
   CliqOutboxItem,
   CaseStage,
   AgreementStage,
+  QuotationRecord,
+  ClientNoteRecord,
 } from './types';
+import { getStoredUser, isSuperAdminOrFinance } from './auth';
 
 // ==========================================
 // 1. PROFILES & CLIENTS & PROJECT CODES
@@ -147,10 +150,26 @@ async function enrichCases(cases: any[]): Promise<CaseRecord[]> {
     (profs || []).forEach((p) => profMap.set(p.id, p));
   }
 
+  const currentUser = getStoredUser();
+  const quoteMap = new Map<string, any>();
+  if (isSuperAdminOrFinance(currentUser) && projectCodeIds.length > 0) {
+    try {
+      const { data: quotes } = await supabase
+        .schema('finance')
+        .from('quotations')
+        .select('*')
+        .in('project_code_id', projectCodeIds);
+      (quotes || []).forEach((q) => quoteMap.set(q.project_code_id, q));
+    } catch {
+      // ignore
+    }
+  }
+
   return cases.map((c) => ({
     ...c,
     project_code: c.project_code || pcMap.get(c.project_code_id) || undefined,
     lead_user: c.lead_user || profMap.get(c.lead_user_id) || undefined,
+    quotation: isSuperAdminOrFinance(currentUser) ? quoteMap.get(c.project_code_id) || undefined : undefined,
   })) as CaseRecord[];
 }
 
@@ -421,6 +440,29 @@ export async function fetchCases(filters?: {
 
   if (!error && data) {
     cases = data as CaseRecord[];
+    const currentUser = getStoredUser();
+    if (isSuperAdminOrFinance(currentUser) && cases.length > 0) {
+      const pcIds = [...new Set(cases.map((c) => c.project_code_id).filter(Boolean))];
+      if (pcIds.length > 0) {
+        try {
+          const { data: quotes } = await supabase
+            .schema('finance')
+            .from('quotations')
+            .select('*')
+            .in('project_code_id', pcIds);
+          if (quotes && quotes.length > 0) {
+            const qMap = new Map<string, any>();
+            quotes.forEach((q) => qMap.set(q.project_code_id, q));
+            cases = cases.map((c) => ({
+              ...c,
+              quotation: qMap.get(c.project_code_id) || undefined,
+            }));
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
   } else {
     // Fallback to separate queries
     let fallbackQuery = litigatorDb
@@ -460,6 +502,9 @@ export async function fetchCases(filters?: {
 }
 
 export async function fetchCaseById(id: string): Promise<CaseRecord> {
+  const currentUser = getStoredUser();
+  let theCase: CaseRecord;
+
   const { data, error } = await litigatorDb
     .from('cases_view')
     .select('*')
@@ -467,19 +512,107 @@ export async function fetchCaseById(id: string): Promise<CaseRecord> {
     .single();
 
   if (!error && data) {
-    return data as CaseRecord;
+    theCase = data as CaseRecord;
+  } else {
+    // Fallback to separate queries
+    const { data: rawCase, error: cErr } = await litigatorDb
+      .from('cases')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (cErr) throw cErr;
+
+    const [enriched] = await enrichCases([rawCase]);
+    theCase = enriched;
   }
 
-  // Fallback to separate queries
-  const { data: rawCase, error: cErr } = await litigatorDb
-    .from('cases')
-    .select('*')
-    .eq('id', id)
-    .single();
-  if (cErr) throw cErr;
+  if (theCase && isSuperAdminOrFinance(currentUser) && theCase.project_code_id) {
+    try {
+      const { data: quote } = await supabase
+        .schema('finance')
+        .from('quotations')
+        .select('*')
+        .eq('project_code_id', theCase.project_code_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (quote) {
+        theCase.quotation = quote as QuotationRecord;
+      }
+    } catch {
+      // ignore
+    }
+  }
 
-  const [enriched] = await enrichCases([rawCase]);
-  return enriched;
+  return theCase;
+}
+
+export async function fetchQuotationByProjectCode(projectCodeId: string): Promise<QuotationRecord | null> {
+  const currentUser = getStoredUser();
+  if (!isSuperAdminOrFinance(currentUser)) return null;
+
+  try {
+    const { data, error } = await supabase
+      .schema('finance')
+      .from('quotations')
+      .select('*')
+      .eq('project_code_id', projectCodeId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return null;
+    return data as QuotationRecord;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveCaseQuotation(params: {
+  projectCodeId: string;
+  clientId?: string;
+  quoteNumber?: string;
+  totalProfFee: number;
+  notes?: string;
+}): Promise<QuotationRecord> {
+  const { data: existing } = await supabase
+    .schema('finance')
+    .from('quotations')
+    .select('id')
+    .eq('project_code_id', params.projectCodeId)
+    .limit(1)
+    .maybeSingle();
+
+  if (existing) {
+    const { data, error } = await supabase
+      .schema('finance')
+      .from('quotations')
+      .update({
+        total_prof_fee: params.totalProfFee,
+        quote_number: params.quoteNumber || null,
+        notes: params.notes || null,
+      })
+      .eq('id', existing.id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as QuotationRecord;
+  } else {
+    const { data, error } = await supabase
+      .schema('finance')
+      .from('quotations')
+      .insert({
+        project_code_id: params.projectCodeId,
+        client_id: params.clientId || null,
+        quote_number: params.quoteNumber || null,
+        total_prof_fee: params.totalProfFee,
+        status: 'CONFIRMED',
+        notes: params.notes || null,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return data as QuotationRecord;
+  }
 }
 
 export interface CreateCaseParams {
@@ -502,6 +635,8 @@ export interface CreateCaseParams {
   clientId?: string;
   newClientName?: string;
   newClientCode?: string;
+  quotationAmount?: number;
+  quotationNumber?: string;
 }
 
 export async function createCase(params: CreateCaseParams): Promise<{ id: string }> {
@@ -528,7 +663,25 @@ export async function createCase(params: CreateCaseParams): Promise<{ id: string
   });
 
   if (error) throw error;
-  return { id: data as string };
+  const caseId = data as string;
+
+  if (params.quotationAmount && isSuperAdminOrFinance(getStoredUser())) {
+    try {
+      const created = await fetchCaseById(caseId);
+      if (created.project_code_id) {
+        await saveCaseQuotation({
+          projectCodeId: created.project_code_id,
+          clientId: created.project_code?.client_id,
+          quoteNumber: params.quotationNumber || `Q-${params.projectCode}`,
+          totalProfFee: Number(params.quotationAmount),
+        });
+      }
+    } catch (e) {
+      console.warn('Could not save quotation on new case:', e);
+    }
+  }
+
+  return { id: caseId };
 }
 
 export async function updateCase(
@@ -580,7 +733,23 @@ export async function updateAfterHearing(params: {
 }) {
   let hearingId = params.hearingId;
 
-  // 1. Update or create the current hearing row
+  // 1. If hearingId not provided, search if a hearing already exists for this case and date
+  if (!hearingId) {
+    const { data: existingHearing } = await litigatorDb
+      .from('hearings')
+      .select('id, outcome')
+      .eq('case_id', params.caseId)
+      .eq('hearing_date', params.hearingDate)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingHearing) {
+      hearingId = existingHearing.id;
+    }
+  }
+
+  // Update or create the current hearing row
   if (hearingId) {
     const { error } = await litigatorDb
       .from('hearings')
@@ -610,6 +779,18 @@ export async function updateAfterHearing(params: {
       .single();
     if (error) throw error;
     hearingId = newH.id;
+  }
+
+  // Clean up any other lingering duplicate hearing rows on the same date with outcome IS NULL
+  try {
+    await litigatorDb
+      .from('hearings')
+      .update({ outcome: params.outcome })
+      .eq('case_id', params.caseId)
+      .eq('hearing_date', params.hearingDate)
+      .is('outcome', null);
+  } catch {
+    // ignore
   }
 
   // 2. If nextDate is provided, create the NEXT hearing row & update case
@@ -1334,14 +1515,76 @@ export async function fetchTodayDashboard(todayStr: string, next7Days: string) {
   const allH = hData || [];
   const allD = dData || [];
 
+  const rawUnupdated = unData || [];
+  const filteredUnupdated = rawUnupdated.filter((h: any) => {
+    if (h.outcome && typeof h.outcome === 'string' && h.outcome.trim() !== '') {
+      return false;
+    }
+    const hasLoggedSameDay = allH.some(
+      (todayH: any) =>
+        todayH.case_id === h.case_id &&
+        todayH.hearing_date === h.hearing_date &&
+        todayH.outcome &&
+        typeof todayH.outcome === 'string' &&
+        todayH.outcome.trim() !== ''
+    );
+    if (hasLoggedSameDay) return false;
+    return true;
+  });
+
   return {
     todayHearings: allH.filter((h: any) => h.hearing_date === todayStr),
     weekHearings: allH.filter((h: any) => h.hearing_date !== todayStr),
-    unupdatedHearings: unData || [],
+    unupdatedHearings: filteredUnupdated,
     overdueDeadlines: allD.filter((d: any) => d.due_date < todayStr),
     upcomingDeadlines: allD.filter((d: any) => d.due_date >= todayStr && d.due_date <= next7Days),
     pendingOrders: oData || [],
   };
+}
+
+export async function fetchClientNotes(projectCodeId: string): Promise<ClientNoteRecord[]> {
+  const { data, error } = await coreDb
+    .from('matter_events')
+    .select(`
+      *,
+      actor_profile:actor_user_id (id, display_name, email, role)
+    `)
+    .eq('project_code_id', projectCodeId)
+    .eq('client_visible', true)
+    .eq('event_code', 'CLIENT_NOTE')
+    .order('occurred_at', { ascending: false });
+
+  if (error) {
+    console.warn('Could not fetch client notes:', error.message);
+    return [];
+  }
+
+  return (data || []).map((ev: any) => ({
+    id: ev.id,
+    project_code_id: ev.project_code_id,
+    author: ev.actor_user_id,
+    note: ev.detail || ev.title,
+    client_visible: true,
+    created_at: ev.occurred_at || ev.created_at,
+    author_profile: ev.actor_profile,
+  }));
+}
+
+export async function createClientNote(params: {
+  projectCodeId: string;
+  note: string;
+  authorId: string;
+}): Promise<void> {
+  await recordMatterEvent({
+    projectCodeId: params.projectCodeId,
+    eventCode: 'CLIENT_NOTE',
+    title: 'Client Note',
+    detail: params.note,
+    occurredAt: clock.nowISO(),
+    actorUserId: params.authorId,
+    clientVisible: true,
+    clientLabel: 'Client Update',
+  });
 }
 
 // ==========================================

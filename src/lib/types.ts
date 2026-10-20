@@ -65,6 +65,35 @@ export interface CaseRecord {
   project_code?: CoreProjectCode | null;
   lead_user?: CoreProfile | null;
   parties?: CasePartyRecord[];
+  quotation?: QuotationRecord | null;
+  quotation_amount?: number | null;
+  quotation_number?: string | null;
+}
+
+export interface QuotationRecord {
+  id: string;
+  project_code_id: string;
+  client_id?: string | null;
+  quote_number?: string | null;
+  version?: number;
+  status?: string;
+  total_prof_fee?: number | null;
+  est_govt_fee?: number | null;
+  gst_applicable?: boolean;
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface ClientNoteRecord {
+  id: string;
+  case_id?: string | null;
+  project_code_id?: string | null;
+  author: string;
+  note: string;
+  client_visible: boolean;
+  created_by?: string | null;
+  created_at: string;
+  author_profile?: CoreProfile | null;
 }
 
 export interface CaseTeamMember {
