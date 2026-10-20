@@ -144,6 +144,117 @@ export const CaseDetailView: React.FC = () => {
   const [uploadCategory, setUploadCategory] = useState<string>('Pleadings');
   const [uploadingFile, setUploadingFile] = useState(false);
 
+  // Master Timeline: Only actual progressed case dates (hearings, orders, filing if set, completed deadlines).
+  // Strictly zero entry dates or database insertion timestamps.
+  // Must be called at top of component to respect React Rules of Hooks (cannot be after conditional returns).
+  const progressEvents = React.useMemo(() => {
+    if (!theCase) return [];
+    const events: {
+      id: string;
+      date: string;
+      title: string;
+      detail?: string | null;
+      category: 'FILING' | 'HEARING' | 'ORDER' | 'DEADLINE' | 'MILESTONE';
+      badge: string;
+      badgeColor: string;
+      actor?: string | null;
+    }[] = [];
+
+    // 1. Filing Date: ONLY if explicitly set and non-empty. Never default to entry date.
+    const fDate = typeof theCase.filing_date === 'string' ? theCase.filing_date.trim() : '';
+    if (fDate) {
+      const caseTypeDisplay = (theCase.case_type || 'Matter').replace(/_/g, ' ');
+      events.push({
+        id: `filing-${theCase.id}`,
+        date: fDate,
+        title: 'Case / Suit Filed in Court',
+        detail: `${theCase.cause_title || 'Court Case'} formally instituted before ${theCase.court || 'Court'}${theCase.bench ? ` (${theCase.bench})` : ''}. Case Type: ${caseTypeDisplay}${theCase.case_number ? ` • Case No: ${theCase.case_number}` : ''}`,
+        category: 'FILING',
+        badge: 'CASE FILED',
+        badgeColor: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800',
+        actor: theCase.lead_user?.display_name,
+      });
+    }
+
+    // 2. Hearings Progressed: by hearing_date
+    hearings.forEach((h) => {
+      if (!h.hearing_date) return;
+      events.push({
+        id: `hearing-${h.id}`,
+        date: h.hearing_date,
+        title: `Court Hearing: ${h.purpose || 'Proceedings'}`,
+        detail: h.outcome
+          ? `Outcome: ${h.outcome}${h.next_date ? ` (Next hearing scheduled: ${clock.formatDisplay(h.next_date)})` : ''}`
+          : `Hearing scheduled${h.next_purpose ? ` for ${h.next_purpose}` : ''}. Outcome pending record.`,
+        category: 'HEARING',
+        badge: h.outcome ? 'HEARING COMPLETED' : 'HEARING SCHEDULED',
+        badgeColor: h.outcome
+          ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800'
+          : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800',
+        actor: h.attending_profile?.display_name,
+      });
+    });
+
+    // 3. Orders Passed: by order_date
+    orders.forEach((ord) => {
+      if (!ord.order_date) return;
+      events.push({
+        id: `order-${ord.id}`,
+        date: ord.order_date,
+        title: `Court Order Passed: ${ord.order_type || 'Order'}`,
+        detail: ord.summary,
+        category: 'ORDER',
+        badge: 'COURT ORDER',
+        badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800',
+        actor: ord.compliance_owner_profile?.display_name,
+      });
+    });
+
+    // 4. Completed Statutory Deadlines: by due_date
+    deadlines
+      .filter((dl) => dl.status === 'DONE' && dl.due_date)
+      .forEach((dl) => {
+        events.push({
+          id: `deadline-${dl.id}`,
+          date: dl.due_date,
+          title: `Statutory Deadline Met: ${dl.title}`,
+          detail: `Type: ${dl.deadline_type}. Owner: ${dl.owner_profile?.display_name || 'Assigned Counsel'}`,
+          category: 'DEADLINE',
+          badge: 'COMPLIANCE MET',
+          badgeColor: 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950 dark:text-purple-300 dark:border-purple-800',
+          actor: dl.owner_profile?.display_name,
+        });
+      });
+
+    // 5. Genuine cross-app progress milestones (filter out synthetic case creation / entry events)
+    timeline.forEach((ev) => {
+      if (
+        ev.event_code === 'CASE_CREATED' ||
+        ev.event_code === 'ENTRY_CREATED' ||
+        ev.event_code === 'SUIT_FILED' ||
+        ev.title?.toLowerCase().includes('created') ||
+        ev.title?.toLowerCase().includes('docket created')
+      ) {
+        return;
+      }
+      if (ev.occurred_at) {
+        events.push({
+          id: `timeline-${ev.id}`,
+          date: ev.occurred_at,
+          title: ev.title,
+          detail: ev.detail,
+          category: 'MILESTONE',
+          badge: ev.event_code || ev.source_app || 'PROGRESS',
+          badgeColor: 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+          actor: ev.actor_profile?.display_name,
+        });
+      }
+    });
+
+    // Sort strictly descending by actual progress date
+    return events.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
+  }, [theCase, hearings, orders, deadlines, timeline]);
+
   const loadCase = async () => {
     if (!id) return;
     try {
@@ -384,114 +495,6 @@ export const CaseDetailView: React.FC = () => {
       setAddingClientNote(false);
     }
   };
-
-  // Master Timeline: Only actual progressed case dates (hearings, orders, filing if set, completed deadlines).
-  // Strictly zero entry dates or database insertion timestamps.
-  const progressEvents = React.useMemo(() => {
-    if (!theCase) return [];
-    const events: {
-      id: string;
-      date: string;
-      title: string;
-      detail?: string | null;
-      category: 'FILING' | 'HEARING' | 'ORDER' | 'DEADLINE' | 'MILESTONE';
-      badge: string;
-      badgeColor: string;
-      actor?: string | null;
-    }[] = [];
-
-    // 1. Filing Date: ONLY if explicitly set and non-empty. Never default to entry date.
-    if (theCase.filing_date && theCase.filing_date.trim()) {
-      events.push({
-        id: `filing-${theCase.id}`,
-        date: theCase.filing_date,
-        title: 'Case / Suit Filed in Court',
-        detail: `${theCase.cause_title} formally instituted before ${theCase.court}${theCase.bench ? ` (${theCase.bench})` : ''}. Case Type: ${theCase.case_type.replace(/_/g, ' ')}${theCase.case_number ? ` • Case No: ${theCase.case_number}` : ''}`,
-        category: 'FILING',
-        badge: 'CASE FILED',
-        badgeColor: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800',
-        actor: theCase.lead_user?.display_name,
-      });
-    }
-
-    // 2. Hearings Progressed: by hearing_date
-    hearings.forEach((h) => {
-      if (!h.hearing_date) return;
-      events.push({
-        id: `hearing-${h.id}`,
-        date: h.hearing_date,
-        title: `Court Hearing: ${h.purpose || 'Proceedings'}`,
-        detail: h.outcome
-          ? `Outcome: ${h.outcome}${h.next_date ? ` (Next hearing scheduled: ${clock.formatDisplay(h.next_date)})` : ''}`
-          : `Hearing scheduled${h.next_purpose ? ` for ${h.next_purpose}` : ''}. Outcome pending record.`,
-        category: 'HEARING',
-        badge: h.outcome ? 'HEARING COMPLETED' : 'HEARING SCHEDULED',
-        badgeColor: h.outcome
-          ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800'
-          : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800',
-        actor: h.attending_profile?.display_name,
-      });
-    });
-
-    // 3. Orders Passed: by order_date
-    orders.forEach((ord) => {
-      if (!ord.order_date) return;
-      events.push({
-        id: `order-${ord.id}`,
-        date: ord.order_date,
-        title: `Court Order Passed: ${ord.order_type}`,
-        detail: ord.summary,
-        category: 'ORDER',
-        badge: 'COURT ORDER',
-        badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800',
-        actor: ord.compliance_owner_profile?.display_name,
-      });
-    });
-
-    // 4. Completed Statutory Deadlines: by due_date
-    deadlines
-      .filter((dl) => dl.status === 'DONE' && dl.due_date)
-      .forEach((dl) => {
-        events.push({
-          id: `deadline-${dl.id}`,
-          date: dl.due_date,
-          title: `Statutory Deadline Met: ${dl.title}`,
-          detail: `Type: ${dl.deadline_type}. Owner: ${dl.owner_profile?.display_name || 'Assigned Counsel'}`,
-          category: 'DEADLINE',
-          badge: 'COMPLIANCE MET',
-          badgeColor: 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950 dark:text-purple-300 dark:border-purple-800',
-          actor: dl.owner_profile?.display_name,
-        });
-      });
-
-    // 5. Genuine cross-app progress milestones (filter out synthetic case creation / entry events)
-    timeline.forEach((ev) => {
-      if (
-        ev.event_code === 'CASE_CREATED' ||
-        ev.event_code === 'ENTRY_CREATED' ||
-        ev.event_code === 'SUIT_FILED' ||
-        ev.title?.toLowerCase().includes('created') ||
-        ev.title?.toLowerCase().includes('docket created')
-      ) {
-        return;
-      }
-      if (ev.occurred_at) {
-        events.push({
-          id: `timeline-${ev.id}`,
-          date: ev.occurred_at,
-          title: ev.title,
-          detail: ev.detail,
-          category: 'MILESTONE',
-          badge: ev.event_code || ev.source_app || 'PROGRESS',
-          badgeColor: 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
-          actor: ev.actor_profile?.display_name,
-        });
-      }
-    });
-
-    // Sort strictly descending by actual progress date
-    return events.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
-  }, [theCase, hearings, orders, deadlines, timeline]);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
