@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Check, AlertCircle, Scale, Calendar, Coins } from 'lucide-react';
 import { updateCase, fetchProfiles, saveCaseQuotation } from '../../lib/api';
+import { uploadLitigatorFile } from '../../lib/files';
 import { getStoredUser, isSuperAdminOrFinance } from '../../lib/auth';
 import { CASE_STAGES, CaseRecord, CaseType, ClientRole, CoreProfile } from '../../lib/types';
 
@@ -67,6 +68,7 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
   const [quotationNumber, setQuotationNumber] = useState(
     theCase.quotation?.quote_number ?? theCase.quotation_number ?? ''
   );
+  const [quotationFile, setQuotationFile] = useState<File | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,16 +130,35 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
         next_purpose: nextPurpose.trim() || null,
       });
 
-      if (canManageQuotation && theCase.project_code_id && quotationAmount !== '') {
-        try {
-          await saveCaseQuotation({
-            projectCodeId: theCase.project_code_id,
-            clientId: theCase.project_code?.client_id,
-            quoteNumber: quotationNumber.trim() || `Q-${theCase.project_code?.code || theCase.id.slice(0, 8)}`,
-            totalProfFee: Number(quotationAmount),
-          });
-        } catch (qErr) {
-          console.warn('Could not update quotation:', qErr);
+      if (canManageQuotation && theCase.project_code_id) {
+        if (quotationFile) {
+          try {
+            await uploadLitigatorFile({
+              file: quotationFile,
+              category: 'Quotation',
+              clientCode: theCase.project_code?.client?.client_code,
+              clientName: theCase.project_code?.client?.client_name,
+              projectCode: theCase.project_code?.code,
+              projectCodeId: theCase.project_code_id,
+              financeOnly: true,
+              uploadedByUserId: currentUser?.id,
+            });
+          } catch (fErr) {
+            console.warn('Could not upload quotation document:', fErr);
+          }
+        }
+
+        if (quotationAmount !== '') {
+          try {
+            await saveCaseQuotation({
+              projectCodeId: theCase.project_code_id,
+              clientId: theCase.project_code?.client_id,
+              quoteNumber: quotationNumber.trim() || `Q-${theCase.project_code?.code || theCase.id.slice(0, 8)}`,
+              totalProfFee: Number(quotationAmount),
+            });
+          } catch (qErr) {
+            console.warn('Could not update quotation:', qErr);
+          }
         }
       }
 
@@ -465,6 +486,27 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
                       className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 font-mono"
                     />
                   </div>
+                </div>
+
+                <div className="pt-1">
+                  <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Attach Quotation PDF / Document
+                  </label>
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                    onChange={(e) => {
+                      if (e.target.files?.[0]) {
+                        setQuotationFile(e.target.files[0]);
+                      }
+                    }}
+                    className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-amber-100 dark:file:bg-amber-900 file:text-amber-800 dark:file:text-amber-200 hover:file:bg-amber-200 cursor-pointer"
+                  />
+                  {quotationFile && (
+                    <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1">
+                      Selected: {quotationFile.name} ({(quotationFile.size / 1024).toFixed(1)} KB)
+                    </div>
+                  )}
                 </div>
               </div>
             )}

@@ -1,5 +1,5 @@
 // src/features/cases/CaseDetailView.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Scale,
@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   Upload,
   AlertCircle,
+  Eye,
   EyeOff,
   MessageSquare,
   Coins,
@@ -84,6 +85,8 @@ import { EditOrderModal } from './EditOrderModal';
 import { EditDeadlineModal } from './EditDeadlineModal';
 import { EditPartyModal } from './EditPartyModal';
 import { AddMilestoneModal } from './AddMilestoneModal';
+import { QuotationModal } from './QuotationModal';
+import { DocumentViewerModal } from './DocumentViewerModal';
 
 type TabKey =
   | 'timeline'
@@ -167,6 +170,9 @@ export const CaseDetailView: React.FC = () => {
   const [editingQuoteAmount, setEditingQuoteAmount] = useState<number | ''>('');
   const [editingQuoteNumber, setEditingQuoteNumber] = useState('');
   const [savingQuote, setSavingQuote] = useState(false);
+
+  // In-Dashboard Document Viewer Modal state
+  const [viewingDocument, setViewingDocument] = useState<CoreDocument | null>(null);
 
   // New Deadline inline
   const [newDlTitle, setNewDlTitle] = useState('');
@@ -303,6 +309,18 @@ export const CaseDetailView: React.FC = () => {
     return events.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
   }, [theCase, hearings, orders, deadlines, timeline]);
 
+  // Active quotation document (if any uploaded under Quotation category or file name)
+  const quotationDoc = useMemo(() => {
+    return (
+      documents.find(
+        (d) =>
+          d.category?.toLowerCase() === 'quotation' ||
+          d.file_name.toLowerCase().includes('quotation') ||
+          d.file_name.toLowerCase().includes('quote')
+      ) || null
+    );
+  }, [documents]);
+
   const loadCase = async () => {
     if (!id) return;
     try {
@@ -336,11 +354,9 @@ export const CaseDetailView: React.FC = () => {
         setClientNotes(cNotes);
       }
 
-      // Load internal notes only if not finance
-      if (!isFinance(currentUser)) {
-        const nList = await fetchInternalNotes(id);
-        setNotes(nList);
-      }
+      // Load internal notes (for internal legal team reference)
+      const nList = await fetchInternalNotes(id);
+      setNotes(nList);
     } catch (err: any) {
       console.error('Error loading case detail:', err);
     } finally {
@@ -685,37 +701,61 @@ export const CaseDetailView: React.FC = () => {
               {theCase.court_fee ? formatINR(theCase.court_fee) : <span className="text-slate-400 font-normal">—</span>}
             </div>
           </div>
+          {/* 4. Quotation Document & Fee (Strictly SUPER_ADMIN and FINANCE only) */}
           {canViewQuotation && (
-            <div>
-              <div className="text-[10px] text-amber-600 dark:text-amber-400 uppercase font-bold flex items-center justify-between">
-                <span>Quotation / Fee</span>
+            <div className="bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/50 rounded-xl p-3 space-y-1.5">
+              <div className="text-[10px] text-amber-700 dark:text-amber-400 uppercase font-bold flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <Coins className="w-3 h-3 text-amber-600" />
+                  <span>Quotation Document &amp; Fee</span>
+                </span>
                 <button
                   type="button"
-                  onClick={() => {
-                    setEditingQuoteAmount(theCase.quotation?.total_prof_fee ?? theCase.quotation_amount ?? '');
-                    setEditingQuoteNumber(theCase.quotation?.quote_number ?? theCase.quotation_number ?? '');
-                    setQuoteModalOpen(true);
-                  }}
+                  onClick={() => setQuoteModalOpen(true)}
                   className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline capitalize font-semibold flex items-center gap-0.5"
                 >
                   <Edit2 className="w-2.5 h-2.5" />
-                  <span>{theCase.quotation || theCase.quotation_amount ? 'Edit' : '+ Set'}</span>
+                  <span>{quotationDoc || theCase.quotation || theCase.quotation_amount ? 'Manage' : '+ Upload'}</span>
                 </button>
               </div>
-              <div className="font-semibold text-slate-800 dark:text-slate-200 font-mono">
-                {theCase.quotation ? (
-                  <span>
-                    {formatINR(theCase.quotation.total_prof_fee)}{' '}
-                    <span className="text-[10px] text-slate-400 font-normal">
-                      ({theCase.quotation.quote_number || 'Quote'} • {theCase.quotation.status})
+
+              {quotationDoc ? (
+                <div className="flex items-center justify-between gap-2 pt-0.5">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <FileText className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate" title={quotationDoc.file_name}>
+                      {quotationDoc.file_name}
                     </span>
-                  </span>
-                ) : theCase.quotation_amount ? (
-                  <span>{formatINR(theCase.quotation_amount)}</span>
-                ) : (
-                  <span className="text-slate-400 text-xs font-normal">Not quoted</span>
-                )}
-              </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setViewingDocument(quotationDoc)}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded shadow-2xs transition shrink-0"
+                    title="Open quotation document directly in dashboard"
+                  >
+                    <Eye className="w-3 h-3" />
+                    <span>Open in Dashboard</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setQuoteModalOpen(true)}
+                  className="text-xs text-amber-700 dark:text-amber-300 hover:underline font-medium flex items-center gap-1 py-0.5"
+                >
+                  <Upload className="w-3 h-3" />
+                  <span>Upload Quotation PDF / Document</span>
+                </button>
+              )}
+
+              {(theCase.quotation?.total_prof_fee || theCase.quotation_amount) ? (
+                <div className="text-[11px] text-slate-600 dark:text-slate-300 font-mono pt-1 border-t border-amber-200/40 dark:border-amber-800/30 flex items-center justify-between">
+                  <span>Fee: {formatINR(theCase.quotation?.total_prof_fee ?? theCase.quotation_amount ?? 0)}</span>
+                  {theCase.quotation?.quote_number && (
+                    <span className="text-[10px] text-slate-400">Ref: {theCase.quotation.quote_number}</span>
+                  )}
+                </div>
+              ) : null}
             </div>
           )}
         </div>
@@ -729,9 +769,7 @@ export const CaseDetailView: React.FC = () => {
           { key: 'deadlines', label: `Deadlines (${deadlines.length})`, icon: Clock },
           { key: 'hearings', label: `Hearings (${hearings.length})`, icon: Calendar },
           { key: 'orders', label: `Orders (${orders.length})`, icon: Scale },
-          ...(!isFinance(currentUser)
-            ? [{ key: 'notes', label: `Internal Notes (${notes.length})`, icon: FileText }]
-            : []),
+          { key: 'notes', label: `Internal Notes (${notes.length})`, icon: FileText },
           { key: 'client_notes', label: `Client Notes (${clientNotes.length})`, icon: MessageSquare },
           { key: 'documents', label: `Document Vault (${documents.length})`, icon: FolderLock },
           { key: 'linked_ip', label: `Linked IP (${linkedIp.length})`, icon: LinkIcon },
@@ -1718,12 +1756,22 @@ export const CaseDetailView: React.FC = () => {
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => openDocument(doc)}
-                    className="px-3 py-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 rounded-md transition"
-                  >
-                    View / Download
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setViewingDocument(doc)}
+                      className="px-2.5 py-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 rounded-md transition flex items-center gap-1"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Open in Dashboard</span>
+                    </button>
+                    <button
+                      onClick={() => openDocument(doc)}
+                      className="px-2 py-1 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition"
+                      title="Open in new window / Download"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1805,69 +1853,34 @@ export const CaseDetailView: React.FC = () => {
         </div>
       )}
 
-      {/* Quotation Edit Modal (SuperAdmin & Finance only) */}
+      {/* Quotation & Document Manager Modal (SuperAdmin & Finance only) */}
       {quoteModalOpen && canViewQuotation && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <Coins className="w-4 h-4 text-amber-500" />
-                <span>Matter Quotation / Fee</span>
-              </h3>
-              <button
-                onClick={() => setQuoteModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs"
-              >
-                Cancel
-              </button>
-            </div>
-            <form onSubmit={handleSaveQuotation} className="space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Quotation / Professional Fee (₹)
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  required
-                  value={editingQuoteAmount}
-                  onChange={(e) => setEditingQuoteAmount(e.target.value ? Number(e.target.value) : '')}
-                  placeholder="e.g. 150000"
-                  className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Quote Reference No.
-                </label>
-                <input
-                  type="text"
-                  value={editingQuoteNumber}
-                  onChange={(e) => setEditingQuoteNumber(e.target.value)}
-                  placeholder="Auto-generated if empty"
-                  className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 font-mono"
-                />
-              </div>
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setQuoteModalOpen(false)}
-                  className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingQuote}
-                  className="px-4 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
-                >
-                  {savingQuote ? 'Saving...' : 'Save Quotation'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <QuotationModal
+          isOpen={quoteModalOpen}
+          onClose={() => setQuoteModalOpen(false)}
+          onSuccess={loadCase}
+          caseId={theCase.id}
+          projectCodeId={theCase.project_code_id}
+          clientCode={theCase.project_code?.client?.client_code}
+          clientName={theCase.project_code?.client?.client_name}
+          projectCode={theCase.project_code?.code}
+          existingQuotation={theCase.quotation}
+          existingQuotationAmount={theCase.quotation_amount}
+          existingQuotationNumber={theCase.quotation_number}
+          existingDocument={quotationDoc}
+          onOpenDocumentViewer={(doc) => {
+            setQuoteModalOpen(false);
+            setViewingDocument(doc);
+          }}
+        />
       )}
+
+      {/* In-Dashboard Document Viewer Modal */}
+      <DocumentViewerModal
+        isOpen={Boolean(viewingDocument)}
+        onClose={() => setViewingDocument(null)}
+        document={viewingDocument}
+      />
 
       {/* Edit Case Details Modal */}
       <EditCaseModal

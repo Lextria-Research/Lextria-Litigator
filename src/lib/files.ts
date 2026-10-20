@@ -19,6 +19,7 @@ export const LITIGATION_FILE_CATEGORIES = [
   'Drafts',
   'Final',
   'Internal',
+  'Quotation',
 ] as const;
 
 export type LitigationFileCategory = typeof LITIGATION_FILE_CATEGORIES[number];
