@@ -22,25 +22,37 @@ import {
   MessageSquare,
   Coins,
   Edit2,
+  Trash2,
 } from 'lucide-react';
 import {
   fetchCaseById,
   updateCase,
   fetchHearings,
+  deleteHearing,
   fetchOrders,
+  createOrder,
+  updateOrder,
+  deleteOrder,
   fetchParties,
+  createParty,
+  updateParty,
+  deleteParty,
   fetchInternalNotes,
   createInternalNote,
+  updateInternalNote,
+  deleteInternalNote,
   fetchLinkedIP,
   createLinkedIP,
   fetchDeadlines,
   createDeadline,
+  updateDeadline,
+  deleteDeadline,
   fetchMatterEvents,
   fetchProfiles,
-  createOrder,
-  createParty,
   fetchClientNotes,
   createClientNote,
+  updateClientNote,
+  deleteClientNote,
   saveCaseQuotation,
 } from '../../lib/api';
 import { clock } from '../../lib/clock';
@@ -67,6 +79,11 @@ import {
   CoreDocument,
 } from '../../lib/types';
 import { UpdateHearingModal } from './UpdateHearingModal';
+import { EditCaseModal } from './EditCaseModal';
+import { EditOrderModal } from './EditOrderModal';
+import { EditDeadlineModal } from './EditDeadlineModal';
+import { EditPartyModal } from './EditPartyModal';
+import { AddMilestoneModal } from './AddMilestoneModal';
 
 type TabKey =
   | 'timeline'
@@ -101,18 +118,49 @@ export const CaseDetailView: React.FC = () => {
   const [clientNotes, setClientNotes] = useState<ClientNoteRecord[]>([]);
   const [timeline, setTimeline] = useState<CoreMatterEvent[]>([]);
 
+  // Edit Case Details modal state
+  const [editCaseOpen, setEditCaseOpen] = useState(false);
+
   // Update hearing modal state
   const [updateHearingOpen, setUpdateHearingOpen] = useState(false);
   const [targetHearing, setTargetHearing] = useState<HearingRecord | null>(null);
 
+  // Edit Order modal state
+  const [orderModalOpen, setOrderModalOpen] = useState(false);
+  const [targetOrder, setTargetOrder] = useState<OrderRecord | null>(null);
+
+  // Edit Deadline modal state
+  const [deadlineModalOpen, setDeadlineModalOpen] = useState(false);
+  const [targetDeadline, setTargetDeadline] = useState<DeadlineRecord | null>(null);
+
+  // Edit Party modal state
+  const [partyModalOpen, setPartyModalOpen] = useState(false);
+  const [targetParty, setTargetParty] = useState<CasePartyRecord | null>(null);
+
+  // Timeline Milestone modal state
+  const [milestoneModalOpen, setMilestoneModalOpen] = useState(false);
+  const [targetMilestone, setTargetMilestone] = useState<{
+    id: string;
+    date: string;
+    title: string;
+    detail?: string | null;
+    category?: string;
+  } | null>(null);
+
   // Quick form states
   const [newNoteText, setNewNoteText] = useState('');
   const [addingNote, setAddingNote] = useState(false);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState('');
+  const [savingNoteEdit, setSavingNoteEdit] = useState(false);
 
   // Client notes form states
   const [newClientNoteTitle, setNewClientNoteTitle] = useState('');
   const [newClientNoteText, setNewClientNoteText] = useState('');
   const [addingClientNote, setAddingClientNote] = useState(false);
+  const [editingClientNoteId, setEditingClientNoteId] = useState<string | null>(null);
+  const [editingClientNoteText, setEditingClientNoteText] = useState('');
+  const [savingClientNoteEdit, setSavingClientNoteEdit] = useState(false);
 
   // Quotation edit modal
   const [quoteModalOpen, setQuoteModalOpen] = useState(false);
@@ -575,6 +623,16 @@ export const CaseDetailView: React.FC = () => {
               </select>
             </div>
 
+            {/* Edit Case Details Action */}
+            <button
+              type="button"
+              onClick={() => setEditCaseOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg shadow-2xs transition"
+            >
+              <Edit2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>Edit Case Details</span>
+            </button>
+
             {/* Update Hearing Action */}
             <button
               type="button"
@@ -696,7 +754,7 @@ export const CaseDetailView: React.FC = () => {
       {/* TAB 1: MASTER TIMELINE (Actual progressed case dates only) */}
       {activeTab === 'timeline' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
             <div>
               <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
                 Master Case Trajectory &amp; Progression Timeline
@@ -705,8 +763,21 @@ export const CaseDetailView: React.FC = () => {
                 Chronological record of actual court hearings, judicial orders, and filing progression ({progressEvents.length} milestones)
               </p>
             </div>
-            <div className="text-[10px] text-slate-500 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">
-              Progress Dates Only • Entry Dates Excluded
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetMilestone(null);
+                  setMilestoneModalOpen(true);
+                }}
+                className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition flex items-center gap-1.5 shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Milestone</span>
+              </button>
+              <div className="text-[10px] text-slate-500 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded hidden sm:block">
+                Progress Dates Only
+              </div>
             </div>
           </div>
 
@@ -719,13 +790,23 @@ export const CaseDetailView: React.FC = () => {
               <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
                 Timeline records actual court hearings, judicial orders, and formal filing dates as proceedings advance.
               </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetMilestone(null);
+                  setMilestoneModalOpen(true);
+                }}
+                className="mt-2 px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:underline"
+              >
+                + Add First Milestone
+              </button>
             </div>
           ) : (
             <div className="relative pl-6 space-y-5 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200 dark:before:bg-slate-800">
               {progressEvents.map((ev) => (
                 <div key={ev.id} className="relative group">
                   <div className="absolute -left-6 top-1.5 w-2.5 h-2.5 rounded-full bg-indigo-600 ring-4 ring-white dark:ring-slate-900 group-hover:scale-125 transition" />
-                  <div className="p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20 hover:border-indigo-200 dark:hover:border-indigo-800 transition space-y-1.5">
+                  <div className="p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20 hover:border-indigo-200 dark:hover:border-indigo-800 transition space-y-2">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-xs text-slate-900 dark:text-slate-100">
@@ -735,8 +816,10 @@ export const CaseDetailView: React.FC = () => {
                           {ev.badge}
                         </span>
                       </div>
-                      <div className="font-bold text-xs text-indigo-600 dark:text-indigo-400 font-mono">
-                        {clock.formatDisplay(ev.date)}
+                      <div className="flex items-center gap-3">
+                        <span className="font-bold text-xs text-indigo-600 dark:text-indigo-400 font-mono">
+                          {clock.formatDisplay(ev.date)}
+                        </span>
                       </div>
                     </div>
                     {ev.detail && (
@@ -744,11 +827,100 @@ export const CaseDetailView: React.FC = () => {
                         {ev.detail}
                       </p>
                     )}
-                    {ev.actor && (
-                      <div className="text-[10px] text-slate-400 pt-0.5">
-                        Recorded / Attended by: <span className="font-medium text-slate-600 dark:text-slate-300">{ev.actor}</span>
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100 dark:border-slate-800/60 text-[10px]">
+                      <div>
+                        {ev.actor && (
+                          <span className="text-slate-400">
+                            Recorded / Attended by: <span className="font-medium text-slate-600 dark:text-slate-300">{ev.actor}</span>
+                          </span>
+                        )}
                       </div>
-                    )}
+
+                      {/* Action buttons based on event category */}
+                      <div className="flex items-center gap-2">
+                        {ev.category === 'HEARING' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const rawId = ev.id.replace('hearing-', '');
+                              const found = hearings.find((h) => h.id === rawId);
+                              setTargetHearing(found || null);
+                              setUpdateHearingOpen(true);
+                            }}
+                            className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 font-semibold flex items-center gap-1"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                            <span>Edit Hearing &amp; Outcome</span>
+                          </button>
+                        )}
+
+                        {ev.category === 'FILING' && (
+                          <button
+                            type="button"
+                            onClick={() => setEditCaseOpen(true)}
+                            className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 font-semibold flex items-center gap-1"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                            <span>Edit Filing Date</span>
+                          </button>
+                        )}
+
+                        {ev.category === 'ORDER' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const rawId = ev.id.replace('order-', '');
+                              const found = orders.find((o) => o.id === rawId);
+                              setTargetOrder(found || null);
+                              setOrderModalOpen(true);
+                            }}
+                            className="text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 font-semibold flex items-center gap-1"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                            <span>Edit Order</span>
+                          </button>
+                        )}
+
+                        {ev.category === 'DEADLINE' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const rawId = ev.id.replace('deadline-', '');
+                              const found = deadlines.find((d) => d.id === rawId);
+                              if (found) {
+                                setTargetDeadline(found);
+                                setDeadlineModalOpen(true);
+                              }
+                            }}
+                            className="text-purple-600 hover:text-purple-800 dark:text-purple-400 dark:hover:text-purple-300 font-semibold flex items-center gap-1"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                            <span>Edit Deadline</span>
+                          </button>
+                        )}
+
+                        {ev.category === 'MILESTONE' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const rawId = ev.id.replace('timeline-', '');
+                              setTargetMilestone({
+                                id: rawId,
+                                date: ev.date,
+                                title: ev.title,
+                                detail: ev.detail,
+                                category: ev.badge,
+                              });
+                              setMilestoneModalOpen(true);
+                            }}
+                            className="text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 font-semibold flex items-center gap-1"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                            <span>Edit Milestone</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -825,13 +997,26 @@ export const CaseDetailView: React.FC = () => {
                     Role: {p.party_role} {p.counsel_name ? `• Counsel: ${p.counsel_name}` : ''}
                   </div>
                 </div>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                  p.side === 'OURS'
-                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
-                    : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                }`}>
-                  {p.side}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                    p.side === 'OURS'
+                      ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
+                      : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                  }`}>
+                    {p.side}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTargetParty(p);
+                      setPartyModalOpen(true);
+                    }}
+                    className="p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 rounded transition"
+                    title="Edit Party"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -920,13 +1105,27 @@ export const CaseDetailView: React.FC = () => {
                     <div className="text-[11px] text-slate-500">
                       Due: {clock.formatDisplay(dl.due_date)} • Owner: {dl.owner_profile?.display_name} • Backup:{' '}
                       {dl.backup_profile?.display_name}
+                      {dl.done_note ? ` • Note: ${dl.done_note}` : ''}
                     </div>
                   </div>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                    dl.status === 'DONE' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                  }`}>
-                    {dl.status}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                      dl.status === 'DONE' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {dl.status}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTargetDeadline(dl);
+                        setDeadlineModalOpen(true);
+                      }}
+                      className="p-1 text-slate-400 hover:text-purple-600 dark:hover:text-purple-400 rounded transition"
+                      title="Edit Deadline"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -937,35 +1136,50 @@ export const CaseDetailView: React.FC = () => {
       {/* TAB 4: HEARINGS */}
       {activeTab === 'hearings' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-              Proceedings &amp; Daily Hearing Diary
-            </h3>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div>
+              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                Proceedings &amp; Daily Hearing Diary
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Comprehensive record of past and upcoming court appearances
+              </p>
+            </div>
             <button
               onClick={() => {
-                const upcoming = hearings.find((h) => h.hearing_date === theCase.next_hearing_date);
-                setTargetHearing(upcoming || null);
+                setTargetHearing(null);
                 setUpdateHearingOpen(true);
               }}
-              className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition flex items-center gap-1.5"
+              className="px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition flex items-center gap-1.5 shadow-xs"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Update Hearing / Outcome</span>
+              <span>Record Court Hearing</span>
             </button>
           </div>
 
           {hearings.length === 0 ? (
-            <div className="py-12 text-center text-xs text-slate-400">
-              No hearings logged yet. Use "Update Hearing" to record court appearances.
+            <div className="py-12 text-center text-xs text-slate-400 space-y-2">
+              <Calendar className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto" />
+              <div>No hearings logged yet for this matter.</div>
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetHearing(null);
+                  setUpdateHearingOpen(true);
+                }}
+                className="text-xs font-semibold text-indigo-600 hover:underline"
+              >
+                + Record First Hearing
+              </button>
             </div>
           ) : (
             <div className="space-y-3">
               {hearings.map((h) => (
                 <div
                   key={h.id}
-                  className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-2"
+                  className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-2.5"
                 >
-                  <div className="flex items-start justify-between">
+                  <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                         <span>{clock.formatDisplay(h.hearing_date)}</span>
@@ -975,24 +1189,43 @@ export const CaseDetailView: React.FC = () => {
                         Attended by: {h.attending_profile?.display_name || 'Unrecorded'}
                       </div>
                     </div>
-                    {h.next_date && (
-                      <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded">
-                        Next Date: {clock.formatDisplay(h.next_date)} ({h.next_purpose || 'Orders'})
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {h.next_date && (
+                        <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded">
+                          Next: {clock.formatDisplay(h.next_date)} ({h.next_purpose || 'Orders'})
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm(`Are you sure you want to delete the hearing on ${clock.formatDisplay(h.hearing_date)}?`)) return;
+                          try {
+                            await deleteHearing(h.id);
+                            loadCase();
+                          } catch (e: any) {
+                            alert(e.message);
+                          }
+                        }}
+                        className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                        title="Delete Hearing"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
                   {h.outcome && h.outcome.trim() ? (
                     <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-700/60 rounded-lg text-xs text-slate-700 dark:text-slate-300 flex items-start justify-between gap-3">
-                      <div className="whitespace-pre-wrap">{h.outcome}</div>
+                      <div className="whitespace-pre-wrap flex-1">{h.outcome}</div>
                       <button
                         onClick={() => {
                           setTargetHearing(h);
                           setUpdateHearingOpen(true);
                         }}
-                        className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold shrink-0"
+                        className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold shrink-0 flex items-center gap-1"
                       >
-                        Edit Outcome
+                        <Edit2 className="w-3 h-3" />
+                        <span>Edit Hearing &amp; Outcome</span>
                       </button>
                     </div>
                   ) : (
@@ -1001,15 +1234,17 @@ export const CaseDetailView: React.FC = () => {
                         <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                         <span>Outcome pending record</span>
                       </div>
-                      <button
-                        onClick={() => {
-                          setTargetHearing(h);
-                          setUpdateHearingOpen(true);
-                        }}
-                        className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded transition"
-                      >
-                        Log Outcome
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setTargetHearing(h);
+                            setUpdateHearingOpen(true);
+                          }}
+                          className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded transition"
+                        >
+                          Log Outcome
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -1032,15 +1267,41 @@ export const CaseDetailView: React.FC = () => {
       {/* TAB 5: ORDERS */}
       {activeTab === 'orders' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-              Court Orders &amp; Compliance Register
-            </h3>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div>
+              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                Court Orders &amp; Compliance Register
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Track ad-interim reliefs, injunctions, directions, and decree obligations
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setTargetOrder(null);
+                setOrderModalOpen(true);
+              }}
+              className="px-3.5 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition flex items-center gap-1.5 shadow-xs"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Record Order</span>
+            </button>
           </div>
 
           {orders.length === 0 ? (
-            <div className="py-12 text-center text-xs text-slate-400">
-              No orders logged for this matter.
+            <div className="py-12 text-center text-xs text-slate-400 space-y-2">
+              <FileText className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto" />
+              <div>No orders logged for this matter.</div>
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetOrder(null);
+                  setOrderModalOpen(true);
+                }}
+                className="text-xs font-semibold text-emerald-600 hover:underline"
+              >
+                + Record First Order
+              </button>
             </div>
           ) : (
             <div className="space-y-3">
@@ -1058,13 +1319,42 @@ export const CaseDetailView: React.FC = () => {
                         {ord.order_type}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-700 dark:text-slate-300">{ord.summary}</p>
+                    <p className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{ord.summary}</p>
                     {ord.compliance_required && (
                       <div className="text-[11px] text-purple-700 dark:text-purple-300 font-medium">
                         Compliance Required by: {clock.formatDisplay(ord.compliance_due)} (Owner:{' '}
                         {ord.compliance_owner_profile?.display_name || 'Assigned Lead'})
                       </div>
                     )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTargetOrder(ord);
+                        setOrderModalOpen(true);
+                      }}
+                      className="p-1 text-slate-400 hover:text-emerald-600 rounded transition"
+                      title="Edit Order"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!confirm(`Are you sure you want to delete order from ${clock.formatDisplay(ord.order_date)}?`)) return;
+                        try {
+                          await deleteOrder(ord.id);
+                          loadCase();
+                        } catch (e: any) {
+                          alert(e.message);
+                        }
+                      }}
+                      className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                      title="Delete Order"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -1111,15 +1401,85 @@ export const CaseDetailView: React.FC = () => {
             {notes.map((n) => (
               <div
                 key={n.id}
-                className="p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-1"
+                className="p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-2"
               >
                 <div className="flex items-center justify-between text-[11px] text-slate-400">
                   <span className="font-semibold text-slate-700 dark:text-slate-300">
                     {n.author_profile?.display_name || 'Counsel'}
                   </span>
-                  <span>{clock.formatDisplay(n.created_at)}</span>
+                  <div className="flex items-center gap-2">
+                    <span>{clock.formatDisplay(n.created_at)}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingNoteId(n.id);
+                        setEditingNoteText(n.note);
+                      }}
+                      className="p-1 text-slate-400 hover:text-indigo-600 rounded transition"
+                      title="Edit Note"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!confirm('Are you sure you want to delete this privileged note?')) return;
+                        try {
+                          await deleteInternalNote(n.id);
+                          loadCase();
+                        } catch (e: any) {
+                          alert(e.message);
+                        }
+                      }}
+                      className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                      title="Delete Note"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-800 dark:text-slate-200 whitespace-pre-wrap">{n.note}</p>
+
+                {editingNoteId === n.id ? (
+                  <div className="space-y-2 pt-1">
+                    <textarea
+                      rows={3}
+                      value={editingNoteText}
+                      onChange={(e) => setEditingNoteText(e.target.value)}
+                      className="w-full p-2.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingNoteId(null)}
+                        className="px-2.5 py-1 text-xs text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingNoteEdit}
+                        onClick={async () => {
+                          if (!editingNoteText.trim()) return;
+                          setSavingNoteEdit(true);
+                          try {
+                            await updateInternalNote(n.id, editingNoteText.trim());
+                            setEditingNoteId(null);
+                            loadCase();
+                          } catch (e: any) {
+                            alert(e.message);
+                          } finally {
+                            setSavingNoteEdit(false);
+                          }
+                        }}
+                        className="px-3 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded transition"
+                      >
+                        {savingNoteEdit ? 'Saving...' : 'Save Note'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-800 dark:text-slate-200 whitespace-pre-wrap">{n.note}</p>
+                )}
               </div>
             ))}
           </div>
@@ -1208,15 +1568,86 @@ export const CaseDetailView: React.FC = () => {
                         CLIENT VISIBLE
                       </span>
                     </div>
-                    <span className="text-[11px] text-slate-400">
-                      {clock.formatDisplay(cn.created_at)}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-slate-400">
+                        {clock.formatDisplay(cn.created_at)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingClientNoteId(cn.id);
+                          setEditingClientNoteText(cn.note);
+                        }}
+                        className="p-1 text-slate-400 hover:text-emerald-600 rounded transition"
+                        title="Edit Client Note"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm('Are you sure you want to delete this client note?')) return;
+                          try {
+                            await deleteClientNote(cn.id);
+                            loadCase();
+                          } catch (e: any) {
+                            alert(e.message);
+                          }
+                        }}
+                        className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                        title="Delete Client Note"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
-                  {cn.note && (
-                    <p className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
-                      {cn.note}
-                    </p>
+
+                  {editingClientNoteId === cn.id ? (
+                    <div className="space-y-2 pt-1">
+                      <textarea
+                        rows={3}
+                        value={editingClientNoteText}
+                        onChange={(e) => setEditingClientNoteText(e.target.value)}
+                        className="w-full p-2.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditingClientNoteId(null)}
+                          className="px-2.5 py-1 text-xs text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingClientNoteEdit}
+                          onClick={async () => {
+                            if (!editingClientNoteText.trim()) return;
+                            setSavingClientNoteEdit(true);
+                            try {
+                              await updateClientNote(cn.id, editingClientNoteText.trim());
+                              setEditingClientNoteId(null);
+                              loadCase();
+                            } catch (e: any) {
+                              alert(e.message);
+                            } finally {
+                              setSavingClientNoteEdit(false);
+                            }
+                          }}
+                          className="px-3 py-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded transition"
+                        >
+                          {savingClientNoteEdit ? 'Saving...' : 'Save Update'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    cn.note && (
+                      <p className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+                        {cn.note}
+                      </p>
+                    )
                   )}
+
                   <div className="text-[10px] text-slate-400 pt-1 border-t border-emerald-100/60 dark:border-emerald-900/40">
                     Logged by {cn.author_profile?.display_name || 'Counsel'}
                   </div>
@@ -1438,23 +1869,89 @@ export const CaseDetailView: React.FC = () => {
         </div>
       )}
 
-      {/* Update Hearing Modal */}
+      {/* Edit Case Details Modal */}
+      <EditCaseModal
+        isOpen={editCaseOpen}
+        onClose={() => setEditCaseOpen(false)}
+        onSuccess={loadCase}
+        theCase={theCase}
+      />
+
+      {/* Update / Edit Hearing Modal */}
       <UpdateHearingModal
         isOpen={updateHearingOpen}
-        onClose={() => setUpdateHearingOpen(false)}
+        onClose={() => {
+          setUpdateHearingOpen(false);
+          setTargetHearing(null);
+        }}
         onSuccess={() => {
           setUpdateHearingOpen(false);
+          setTargetHearing(null);
           loadCase();
         }}
         caseId={theCase.id}
         causeTitle={theCase.cause_title}
         hearingId={targetHearing?.id}
-        defaultHearingDate={theCase.next_hearing_date || undefined}
-        defaultPurpose={theCase.next_purpose || undefined}
+        defaultHearingDate={targetHearing?.hearing_date || theCase.next_hearing_date || undefined}
+        defaultPurpose={targetHearing?.purpose || theCase.next_purpose || undefined}
+        defaultOutcome={targetHearing?.outcome || ''}
+        defaultNextDate={targetHearing?.next_date || ''}
+        defaultNextPurpose={targetHearing?.next_purpose || ''}
+        defaultAttendedBy={targetHearing?.attended_by || ''}
         clientCode={theCase.project_code?.client?.client_code}
         clientName={theCase.project_code?.client?.client_name}
         projectCode={theCase.project_code?.code}
         projectCodeId={theCase.project_code_id}
+      />
+
+      {/* Record / Edit Order Modal */}
+      <EditOrderModal
+        isOpen={orderModalOpen}
+        onClose={() => {
+          setOrderModalOpen(false);
+          setTargetOrder(null);
+        }}
+        onSuccess={loadCase}
+        caseId={theCase.id}
+        order={targetOrder}
+      />
+
+      {/* Edit Statutory / Court Deadline Modal */}
+      {targetDeadline && (
+        <EditDeadlineModal
+          isOpen={deadlineModalOpen}
+          onClose={() => {
+            setDeadlineModalOpen(false);
+            setTargetDeadline(null);
+          }}
+          onSuccess={loadCase}
+          deadline={targetDeadline}
+        />
+      )}
+
+      {/* Edit Litigation Party Modal */}
+      {targetParty && (
+        <EditPartyModal
+          isOpen={partyModalOpen}
+          onClose={() => {
+            setPartyModalOpen(false);
+            setTargetParty(null);
+          }}
+          onSuccess={loadCase}
+          party={targetParty}
+        />
+      )}
+
+      {/* Add / Edit Master Timeline Milestone Modal */}
+      <AddMilestoneModal
+        isOpen={milestoneModalOpen}
+        onClose={() => {
+          setMilestoneModalOpen(false);
+          setTargetMilestone(null);
+        }}
+        onSuccess={loadCase}
+        projectCodeId={theCase.project_code_id}
+        existingMilestone={targetMilestone}
       />
     </div>
   );

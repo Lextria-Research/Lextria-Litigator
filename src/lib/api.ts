@@ -861,6 +861,97 @@ export async function updateAfterHearing(params: {
   return { hearingId, success: true };
 }
 
+export async function createHearing(hearing: {
+  case_id: string;
+  hearing_date: string;
+  purpose?: string | null;
+  outcome?: string | null;
+  next_date?: string | null;
+  next_purpose?: string | null;
+  attended_by?: string | null;
+  order_document_id?: string | null;
+}): Promise<HearingRecord> {
+  const { data, error } = await litigatorDb
+    .from('hearings')
+    .insert({
+      case_id: hearing.case_id,
+      hearing_date: hearing.hearing_date,
+      purpose: hearing.purpose || 'Hearing',
+      outcome: hearing.outcome || null,
+      next_date: hearing.next_date || null,
+      next_purpose: hearing.next_purpose || null,
+      attended_by: hearing.attended_by || null,
+      order_document_id: hearing.order_document_id || null,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+
+  if (hearing.next_date) {
+    try {
+      await litigatorDb
+        .from('cases')
+        .update({
+          next_hearing_date: hearing.next_date,
+          next_purpose: hearing.next_purpose || null,
+        })
+        .eq('id', hearing.case_id);
+    } catch {
+      // ignore
+    }
+  }
+
+  const [enriched] = await enrichHearings([data]);
+  return enriched;
+}
+
+export async function updateHearing(
+  hearingId: string,
+  updates: Partial<HearingRecord>
+): Promise<HearingRecord> {
+  const payload: Record<string, any> = {};
+  if (updates.hearing_date !== undefined) payload.hearing_date = updates.hearing_date;
+  if (updates.purpose !== undefined) payload.purpose = updates.purpose;
+  if (updates.outcome !== undefined) payload.outcome = updates.outcome;
+  if (updates.next_date !== undefined) payload.next_date = updates.next_date;
+  if (updates.next_purpose !== undefined) payload.next_purpose = updates.next_purpose;
+  if (updates.attended_by !== undefined) payload.attended_by = updates.attended_by;
+  if (updates.order_document_id !== undefined) payload.order_document_id = updates.order_document_id;
+
+  const { data, error } = await litigatorDb
+    .from('hearings')
+    .update(payload)
+    .eq('id', hearingId)
+    .select()
+    .single();
+  if (error) throw error;
+
+  if (updates.case_id && updates.next_date) {
+    try {
+      await litigatorDb
+        .from('cases')
+        .update({
+          next_hearing_date: updates.next_date,
+          next_purpose: updates.next_purpose || null,
+        })
+        .eq('id', updates.case_id);
+    } catch {
+      // ignore
+    }
+  }
+
+  const [enriched] = await enrichHearings([data]);
+  return enriched;
+}
+
+export async function deleteHearing(hearingId: string): Promise<void> {
+  const { error } = await litigatorDb
+    .from('hearings')
+    .delete()
+    .eq('id', hearingId);
+  if (error) throw error;
+}
+
 export async function fetchOrders(caseId: string): Promise<OrderRecord[]> {
   const { data, error } = await litigatorDb
     .from('orders_view')
@@ -891,6 +982,38 @@ export async function createOrder(order: Partial<OrderRecord>): Promise<OrderRec
   return data as OrderRecord;
 }
 
+export async function updateOrder(
+  orderId: string,
+  updates: Partial<OrderRecord>
+): Promise<OrderRecord> {
+  const payload: Record<string, any> = {};
+  if (updates.order_date !== undefined) payload.order_date = updates.order_date;
+  if (updates.order_type !== undefined) payload.order_type = updates.order_type;
+  if (updates.summary !== undefined) payload.summary = updates.summary;
+  if (updates.compliance_required !== undefined) payload.compliance_required = updates.compliance_required;
+  if (updates.compliance_due !== undefined) payload.compliance_due = updates.compliance_due;
+  if (updates.compliance_owner !== undefined) payload.compliance_owner = updates.compliance_owner;
+  if (updates.document_id !== undefined) payload.document_id = updates.document_id;
+
+  const { data, error } = await litigatorDb
+    .from('orders')
+    .update(payload)
+    .eq('id', orderId)
+    .select()
+    .single();
+  if (error) throw error;
+  const [enriched] = await enrichOrders([data]);
+  return enriched;
+}
+
+export async function deleteOrder(orderId: string): Promise<void> {
+  const { error } = await litigatorDb
+    .from('orders')
+    .delete()
+    .eq('id', orderId);
+  if (error) throw error;
+}
+
 export async function fetchParties(caseId: string): Promise<CasePartyRecord[]> {
   const { data, error } = await litigatorDb
     .from('case_parties')
@@ -909,6 +1032,33 @@ export async function createParty(party: Partial<CasePartyRecord>): Promise<Case
     .single();
   if (error) throw error;
   return data as CasePartyRecord;
+}
+
+export async function updateParty(
+  partyId: string,
+  updates: Partial<CasePartyRecord>
+): Promise<CasePartyRecord> {
+  const { data, error } = await litigatorDb
+    .from('case_parties')
+    .update({
+      name: updates.name,
+      side: updates.side,
+      party_role: updates.party_role,
+      counsel_name: updates.counsel_name,
+    })
+    .eq('id', partyId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as CasePartyRecord;
+}
+
+export async function deleteParty(partyId: string): Promise<void> {
+  const { error } = await litigatorDb
+    .from('case_parties')
+    .delete()
+    .eq('id', partyId);
+  if (error) throw error;
 }
 
 export async function fetchInternalNotes(caseId: string): Promise<InternalNoteRecord[]> {
@@ -943,6 +1093,22 @@ export async function createInternalNote(caseId: string, note: string, authorId:
     .single();
   if (error) throw error;
   return data as InternalNoteRecord;
+}
+
+export async function updateInternalNote(noteId: string, noteText: string): Promise<void> {
+  const { error } = await litigatorDb
+    .from('internal_notes')
+    .update({ note: noteText })
+    .eq('id', noteId);
+  if (error) throw error;
+}
+
+export async function deleteInternalNote(noteId: string): Promise<void> {
+  const { error } = await litigatorDb
+    .from('internal_notes')
+    .delete()
+    .eq('id', noteId);
+  if (error) throw error;
 }
 
 export async function fetchLinkedIP(caseId: string): Promise<LinkedIPRecord[]> {
@@ -1051,6 +1217,38 @@ export async function markDeadlineDone(id: string, doneNote?: string) {
     .single();
   if (error) throw error;
   return data;
+}
+
+export async function updateDeadline(
+  deadlineId: string,
+  updates: Partial<DeadlineRecord>
+): Promise<DeadlineRecord> {
+  const payload: Record<string, any> = {};
+  if (updates.title !== undefined) payload.title = updates.title;
+  if (updates.due_date !== undefined) payload.due_date = updates.due_date;
+  if (updates.deadline_type !== undefined) payload.deadline_type = updates.deadline_type;
+  if (updates.owner_user_id !== undefined) payload.owner_user_id = updates.owner_user_id;
+  if (updates.backup_user_id !== undefined) payload.backup_user_id = updates.backup_user_id;
+  if (updates.status !== undefined) payload.status = updates.status;
+  if (updates.done_note !== undefined) payload.done_note = updates.done_note;
+
+  const { data, error } = await litigatorDb
+    .from('deadlines')
+    .update(payload)
+    .eq('id', deadlineId)
+    .select()
+    .single();
+  if (error) throw error;
+  const [enriched] = await enrichDeadlines([data]);
+  return enriched;
+}
+
+export async function deleteDeadline(deadlineId: string): Promise<void> {
+  const { error } = await litigatorDb
+    .from('deadlines')
+    .delete()
+    .eq('id', deadlineId);
+  if (error) throw error;
 }
 
 // ==========================================
@@ -1629,6 +1827,22 @@ export async function createClientNote(params: {
   });
 }
 
+export async function updateClientNote(eventId: string, noteText: string): Promise<void> {
+  const { error } = await coreDb
+    .from('matter_events')
+    .update({ detail: noteText, title: 'Client Note' })
+    .eq('id', eventId);
+  if (error) throw error;
+}
+
+export async function deleteClientNote(eventId: string): Promise<void> {
+  const { error } = await coreDb
+    .from('matter_events')
+    .delete()
+    .eq('id', eventId);
+  if (error) throw error;
+}
+
 // ==========================================
 // 10. MATTER EVENTS (TIMELINE)
 // ==========================================
@@ -1682,6 +1896,51 @@ export async function recordMatterEvent(params: {
   } catch (e) {
     console.warn('Matter event insert error:', e);
   }
+}
+
+export async function createCustomMilestone(params: {
+  projectCodeId: string;
+  title: string;
+  detail?: string;
+  occurredAt: string;
+  category?: string;
+  actorUserId?: string;
+}): Promise<void> {
+  await recordMatterEvent({
+    projectCodeId: params.projectCodeId,
+    eventCode: params.category || 'MILESTONE',
+    title: params.title,
+    detail: params.detail,
+    occurredAt: params.occurredAt,
+    actorUserId: params.actorUserId,
+    clientVisible: false,
+    clientLabel: params.category || 'Milestone',
+  });
+}
+
+export async function updateMatterEvent(
+  eventId: string,
+  updates: { title?: string; detail?: string; occurredAt?: string; eventCode?: string }
+): Promise<void> {
+  const payload: Record<string, any> = {};
+  if (updates.title !== undefined) payload.title = updates.title;
+  if (updates.detail !== undefined) payload.detail = updates.detail;
+  if (updates.occurredAt !== undefined) payload.occurred_at = updates.occurredAt;
+  if (updates.eventCode !== undefined) payload.event_code = updates.eventCode;
+
+  const { error } = await coreDb
+    .from('matter_events')
+    .update(payload)
+    .eq('id', eventId);
+  if (error) throw error;
+}
+
+export async function deleteMatterEvent(eventId: string): Promise<void> {
+  const { error } = await coreDb
+    .from('matter_events')
+    .delete()
+    .eq('id', eventId);
+  if (error) throw error;
 }
 
 // ==========================================

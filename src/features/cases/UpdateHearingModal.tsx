@@ -1,7 +1,7 @@
 // src/features/cases/UpdateHearingModal.tsx
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, Upload, Check, AlertCircle } from 'lucide-react';
-import { updateAfterHearing, fetchProfiles } from '../../lib/api';
+import { X, Calendar, Upload, Check, AlertCircle, Trash2 } from 'lucide-react';
+import { updateAfterHearing, deleteHearing, fetchProfiles } from '../../lib/api';
 import { uploadLitigatorFile } from '../../lib/files';
 import { clock } from '../../lib/clock';
 import type { CoreProfile } from '../../lib/types';
@@ -15,6 +15,10 @@ interface UpdateHearingModalProps {
   hearingId?: string;
   defaultHearingDate?: string;
   defaultPurpose?: string;
+  defaultOutcome?: string;
+  defaultNextDate?: string;
+  defaultNextPurpose?: string;
+  defaultAttendedBy?: string;
   clientCode?: string;
   clientName?: string;
   projectCode?: string;
@@ -30,6 +34,10 @@ export const UpdateHearingModal: React.FC<UpdateHearingModalProps> = ({
   hearingId,
   defaultHearingDate,
   defaultPurpose,
+  defaultOutcome,
+  defaultNextDate,
+  defaultNextPurpose,
+  defaultAttendedBy,
   clientCode,
   clientName,
   projectCode,
@@ -38,12 +46,13 @@ export const UpdateHearingModal: React.FC<UpdateHearingModalProps> = ({
   const [profiles, setProfiles] = useState<CoreProfile[]>([]);
   const [hearingDate, setHearingDate] = useState(defaultHearingDate || clock.todayYMD());
   const [purpose, setPurpose] = useState(defaultPurpose || 'Regular Hearing');
-  const [outcome, setOutcome] = useState('');
-  const [nextDate, setNextDate] = useState('');
-  const [nextPurpose, setNextPurpose] = useState('');
-  const [attendedBy, setAttendedBy] = useState('');
+  const [outcome, setOutcome] = useState(defaultOutcome || '');
+  const [nextDate, setNextDate] = useState(defaultNextDate || '');
+  const [nextPurpose, setNextPurpose] = useState(defaultNextPurpose || '');
+  const [attendedBy, setAttendedBy] = useState(defaultAttendedBy || '');
   const [orderFile, setOrderFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -51,21 +60,27 @@ export const UpdateHearingModal: React.FC<UpdateHearingModalProps> = ({
       fetchProfiles().then(setProfiles).catch(console.error);
       setHearingDate(defaultHearingDate || clock.todayYMD());
       setPurpose(defaultPurpose || 'Hearing');
-      setOutcome('');
-      setNextDate('');
-      setNextPurpose('');
+      setOutcome(defaultOutcome || '');
+      setNextDate(defaultNextDate || '');
+      setNextPurpose(defaultNextPurpose || '');
+      setAttendedBy(defaultAttendedBy || '');
+      setOrderFile(null);
       setError(null);
     }
-  }, [isOpen, defaultHearingDate, defaultPurpose]);
+  }, [
+    isOpen,
+    defaultHearingDate,
+    defaultPurpose,
+    defaultOutcome,
+    defaultNextDate,
+    defaultNextPurpose,
+    defaultAttendedBy,
+  ]);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!outcome.trim()) {
-      setError('Please provide the hearing outcome or daily order summary.');
-      return;
-    }
 
     setSaving(true);
     setError(null);
@@ -105,6 +120,23 @@ export const UpdateHearingModal: React.FC<UpdateHearingModalProps> = ({
     }
   };
 
+  const handleDelete = async () => {
+    if (!hearingId) return;
+    if (!confirm('Are you sure you want to delete this hearing record from the docket?')) return;
+
+    setDeleting(true);
+    setError(null);
+    try {
+      await deleteHearing(hearingId);
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete hearing');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
       <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
@@ -112,7 +144,7 @@ export const UpdateHearingModal: React.FC<UpdateHearingModalProps> = ({
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800">
           <div>
             <h3 className="font-bold text-base text-slate-900 dark:text-slate-100">
-              Update After Hearing
+              {hearingId ? 'Edit Court Hearing & Outcome' : 'Record Court Hearing'}
             </h3>
             <p className="text-xs text-slate-500 truncate max-w-md">{causeTitle}</p>
           </div>
@@ -168,7 +200,7 @@ export const UpdateHearingModal: React.FC<UpdateHearingModalProps> = ({
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Purpose of Concluded Hearing
+              Purpose of Hearing
             </label>
             <input
               type="text"
@@ -182,10 +214,9 @@ export const UpdateHearingModal: React.FC<UpdateHearingModalProps> = ({
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Outcome &amp; Proceeding Notes <span className="text-rose-500">*</span>
+              Outcome &amp; Proceeding Notes
             </label>
             <textarea
-              required
               rows={3}
               value={outcome}
               onChange={(e) => setOutcome(e.target.value)}
@@ -252,28 +283,44 @@ export const UpdateHearingModal: React.FC<UpdateHearingModalProps> = ({
             </div>
           </div>
 
-          <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-5 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm shadow-indigo-600/30 transition flex items-center gap-1.5 disabled:opacity-50"
-            >
-              {saving ? (
-                <>Updating Hearing...</>
-              ) : (
-                <>
-                  <Check className="w-3.5 h-3.5" />
-                  Save Hearing &amp; Schedule Next
-                </>
+          <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-800">
+            <div>
+              {hearingId && (
+                <button
+                  type="button"
+                  disabled={deleting || saving}
+                  onClick={handleDelete}
+                  className="px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition flex items-center gap-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{deleting ? 'Deleting...' : 'Delete'}</span>
+                </button>
               )}
-            </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving || deleting}
+                className="px-5 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm shadow-indigo-600/30 transition flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {saving ? (
+                  <>Saving...</>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    Save Hearing
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </form>
       </div>
