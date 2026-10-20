@@ -21,17 +21,13 @@ import {
   LogOut,
   RefreshCw,
   ExternalLink,
+  Users,
 } from 'lucide-react';
 import {
   getStoredUser,
-  setStoredUser,
-  getViewAsRole,
-  setViewAsRole,
   signOutUser,
-  SEEDED_TEST_USERS,
   UserProfile,
   Role,
-  TEST_PASSWORDS,
 } from '../../lib/auth';
 import { RoleBanner } from '../common/RoleBanner';
 import { GlobalSearchModal } from '../common/GlobalSearchModal';
@@ -95,23 +91,6 @@ export const AppLayout: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const handleSwitchUser = async (user: UserProfile) => {
-    const pwd = TEST_PASSWORDS[user.email.toLowerCase()];
-    if (pwd) {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: user.email.toLowerCase(),
-        password: pwd,
-      });
-      if (error) {
-        console.error('Failed to switch user session:', error.message);
-        return;
-      }
-    }
-    setStoredUser(user);
-    setCurrentUser(user);
-    setUserMenuOpen(false);
-    window.location.reload();
-  };
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -133,6 +112,7 @@ export const AppLayout: React.FC = () => {
     { label: 'Renewals Docket', path: '/renewals', icon: RefreshCw },
     { label: 'Template Library', path: '/templates', icon: FileBox },
     { label: 'Deadlines', path: '/deadlines', icon: Clock },
+    { label: 'Settings & Team', path: '/settings', icon: Users },
     { label: 'Admin › Integrations', path: '/admin/integrations', icon: Settings },
   ];
 
@@ -286,27 +266,18 @@ export const AppLayout: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Switch Active Test User:
-                </div>
                 <div className="space-y-1 mb-2">
-                  {SEEDED_TEST_USERS.map((u) => (
-                    <button
-                      key={u.id}
-                      type="button"
-                      onClick={() => handleSwitchUser(u)}
-                      className={`w-full text-left p-1.5 rounded-md text-xs transition flex items-center justify-between ${
-                        currentUser?.id === u.id
-                          ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-semibold'
-                          : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      <span className="truncate">{u.display_name}</span>
-                      <span className="text-[9px] font-mono px-1 py-0.5 bg-slate-100 dark:bg-slate-800 rounded">
-                        {u.role}
-                      </span>
-                    </button>
-                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      navigate('/settings');
+                    }}
+                    className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium text-xs transition"
+                  >
+                    <Users className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                    <span>Settings &amp; Team Roster</span>
+                  </button>
                 </div>
 
                 <div className="pt-2 border-t border-slate-100 dark:border-slate-800">

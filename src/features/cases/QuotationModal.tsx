@@ -12,8 +12,8 @@ import {
   Trash2,
   Calendar,
 } from 'lucide-react';
-import { saveCaseQuotation } from '../../lib/api';
-import { uploadLitigatorFile, MAX_UPLOAD_SIZE_BYTES } from '../../lib/files';
+import { saveCaseQuotation, deleteCaseQuotation } from '../../lib/api';
+import { uploadLitigatorFile, deleteProjectDocument, MAX_UPLOAD_SIZE_BYTES } from '../../lib/files';
 import { getStoredUser, isSuperAdminOrFinance } from '../../lib/auth';
 import type { CoreDocument, QuotationRecord } from '../../lib/types';
 
@@ -124,6 +124,28 @@ export const QuotationModal: React.FC<QuotationModalProps> = ({
       onClose();
     } catch (err: any) {
       setError(err?.message || 'Failed to save quotation.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteQuotation = async () => {
+    if (!window.confirm('Are you sure you want to delete this quotation and its uploaded document?')) {
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      if (projectCodeId) {
+        await deleteCaseQuotation(projectCodeId);
+      }
+      if (existingDocument) {
+        await deleteProjectDocument(existingDocument.id);
+      }
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to delete quotation.');
     } finally {
       setSaving(false);
     }
@@ -322,9 +344,24 @@ export const QuotationModal: React.FC<QuotationModalProps> = ({
 
           {/* Footer Actions */}
           <div className="pt-3 flex items-center justify-between border-t border-slate-100 dark:border-slate-800">
-            <span className="text-[10px] text-amber-600 dark:text-amber-400">
-              * Visible to Superadmin &amp; Finance Only
-            </span>
+            <div>
+              {(existingQuotation || existingDocument || existingQuotationAmount) ? (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={handleDeleteQuotation}
+                  className="px-2.5 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition flex items-center gap-1"
+                  title="Delete quotation and document"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Quotation</span>
+                </button>
+              ) : (
+                <span className="text-[10px] text-amber-600 dark:text-amber-400">
+                  * Visible to Superadmin &amp; Finance Only
+                </span>
+              )}
+            </div>
             <div className="flex gap-2">
               <button
                 type="button"

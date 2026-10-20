@@ -615,6 +615,17 @@ export async function saveCaseQuotation(params: {
   }
 }
 
+export async function deleteCaseQuotation(projectCodeId: string): Promise<void> {
+  const { error } = await supabase
+    .schema('finance')
+    .from('quotations')
+    .delete()
+    .eq('project_code_id', projectCodeId);
+  if (error) {
+    console.warn('Could not delete quotation from finance schema:', error.message);
+  }
+}
+
 export interface CreateCaseParams {
   projectCode: string;
   caseType: string;
@@ -2000,3 +2011,41 @@ export async function postCliqAlert(params: {
     });
   }
 }
+
+// ==========================================
+// 12. USER & TEAM MEMBER MANAGEMENT
+// ==========================================
+
+export async function createTeamUser(params: {
+  email: string;
+  password: string;
+  displayName: string;
+  role: 'SUPER_ADMIN' | 'FINANCE' | 'ASSOCIATE';
+  department?: string;
+}): Promise<CoreProfile> {
+  const resp = await fetch('/api/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+
+  const data = await resp.json();
+  if (!resp.ok) {
+    throw new Error(data.error || 'Failed to create team member.');
+  }
+  return data.profile as CoreProfile;
+}
+
+export async function deleteTeamUser(userId: string): Promise<void> {
+  const resp = await fetch('/api/users', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+  });
+
+  const data = await resp.json();
+  if (!resp.ok) {
+    throw new Error(data.error || 'Failed to delete team member.');
+  }
+}
+

@@ -64,7 +64,7 @@ import {
   getDocumentUrl,
   LITIGATION_FILE_CATEGORIES,
 } from '../../lib/files';
-import { getStoredUser, isFinance, isSuperAdminOrFinance } from '../../lib/auth';
+import { getStoredUser, isFinance, isSuperAdminOrFinance, canEditCaseData } from '../../lib/auth';
 import {
   CASE_STAGES,
   CaseRecord,
@@ -104,6 +104,7 @@ export const CaseDetailView: React.FC = () => {
   const navigate = useNavigate();
   const currentUser = getStoredUser();
   const canViewQuotation = isSuperAdminOrFinance(currentUser);
+  const canEdit = canEditCaseData(currentUser);
 
   const [theCase, setTheCase] = useState<CaseRecord | null>(null);
   const [profiles, setProfiles] = useState<CoreProfile[]>([]);
@@ -320,6 +321,17 @@ export const CaseDetailView: React.FC = () => {
       ) || null
     );
   }, [documents]);
+
+  // Vault documents: strictly filter out quotation documents for users without quotation access
+  const visibleDocuments = useMemo(() => {
+    if (canViewQuotation) return documents;
+    return documents.filter(
+      (d) =>
+        d.category?.toLowerCase() !== 'quotation' &&
+        !d.file_name.toLowerCase().includes('quotation') &&
+        !d.file_name.toLowerCase().includes('quote')
+    );
+  }, [documents, canViewQuotation]);
 
   const loadCase = async () => {
     if (!id) return;
@@ -626,42 +638,60 @@ export const CaseDetailView: React.FC = () => {
             {/* Stage Selector */}
             <div className="flex items-center gap-1.5 text-xs">
               <span className="text-slate-400 font-medium">Stage:</span>
-              <select
-                value={theCase.current_stage}
-                onChange={(e) => handleStageChange(e.target.value)}
-                className="px-2.5 py-1 text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg focus:ring-2 focus:ring-indigo-500"
-              >
-                {CASE_STAGES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              {canEdit ? (
+                <select
+                  value={theCase.current_stage}
+                  onChange={(e) => handleStageChange(e.target.value)}
+                  className="px-2.5 py-1 text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                >
+                  {CASE_STAGES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="px-2.5 py-1 text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg">
+                  {theCase.current_stage}
+                </span>
+              )}
             </div>
 
+            {/* Read-Only Notice for Finance Head */}
+            {!canEdit && (
+              <span className="px-2.5 py-1 text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 rounded-lg flex items-center gap-1">
+                <Eye className="w-3 h-3 text-amber-600" />
+                <span>Finance View (Read-Only Particulars)</span>
+              </span>
+            )}
+
             {/* Edit Case Details Action */}
-            <button
-              type="button"
-              onClick={() => setEditCaseOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg shadow-2xs transition"
-            >
-              <Edit2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              <span>Edit Case Details</span>
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => setEditCaseOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg shadow-2xs transition"
+              >
+                <Edit2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span>Edit Case Details</span>
+              </button>
+            )}
 
             {/* Update Hearing Action */}
-            <button
-              type="button"
-              onClick={() => {
-                const upcoming = hearings.find((h) => h.hearing_date === theCase.next_hearing_date);
-                setTargetHearing(upcoming || null);
-                setUpdateHearingOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm shadow-indigo-600/30 transition"
-            >
-              <Calendar className="w-3.5 h-3.5" />
-              <span>Update Hearing</span>
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => {
+                  const upcoming = hearings.find((h) => h.hearing_date === theCase.next_hearing_date);
+                  setTargetHearing(upcoming || null);
+                  setUpdateHearingOpen(true);
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm shadow-indigo-600/30 transition"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>Update Hearing</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -771,7 +801,7 @@ export const CaseDetailView: React.FC = () => {
           { key: 'orders', label: `Orders (${orders.length})`, icon: Scale },
           { key: 'notes', label: `Internal Notes (${notes.length})`, icon: FileText },
           { key: 'client_notes', label: `Client Notes (${clientNotes.length})`, icon: MessageSquare },
-          { key: 'documents', label: `Document Vault (${documents.length})`, icon: FolderLock },
+          { key: 'documents', label: `Document Vault (${visibleDocuments.length})`, icon: FolderLock },
           { key: 'linked_ip', label: `Linked IP (${linkedIp.length})`, icon: LinkIcon },
         ].map((tab) => (
           <button
@@ -802,17 +832,19 @@ export const CaseDetailView: React.FC = () => {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setTargetMilestone(null);
-                  setMilestoneModalOpen(true);
-                }}
-                className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition flex items-center gap-1.5 shadow-xs"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Add Milestone</span>
-              </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTargetMilestone(null);
+                    setMilestoneModalOpen(true);
+                  }}
+                  className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition flex items-center gap-1.5 shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Milestone</span>
+                </button>
+              )}
               <div className="text-[10px] text-slate-500 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded hidden sm:block">
                 Progress Dates Only
               </div>
@@ -875,89 +907,91 @@ export const CaseDetailView: React.FC = () => {
                       </div>
 
                       {/* Action buttons based on event category */}
-                      <div className="flex items-center gap-2">
-                        {ev.category === 'HEARING' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const rawId = ev.id.replace('hearing-', '');
-                              const found = hearings.find((h) => h.id === rawId);
-                              setTargetHearing(found || null);
-                              setUpdateHearingOpen(true);
-                            }}
-                            className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 font-semibold flex items-center gap-1"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            <span>Edit Hearing &amp; Outcome</span>
-                          </button>
-                        )}
+                      {canEdit && (
+                        <div className="flex items-center gap-2">
+                          {ev.category === 'HEARING' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const rawId = ev.id.replace('hearing-', '');
+                                const found = hearings.find((h) => h.id === rawId);
+                                setTargetHearing(found || null);
+                                setUpdateHearingOpen(true);
+                              }}
+                              className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 font-semibold flex items-center gap-1"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              <span>Edit Hearing &amp; Outcome</span>
+                            </button>
+                          )}
 
-                        {ev.category === 'FILING' && (
-                          <button
-                            type="button"
-                            onClick={() => setEditCaseOpen(true)}
-                            className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 font-semibold flex items-center gap-1"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            <span>Edit Filing Date</span>
-                          </button>
-                        )}
+                          {ev.category === 'FILING' && (
+                            <button
+                              type="button"
+                              onClick={() => setEditCaseOpen(true)}
+                              className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 font-semibold flex items-center gap-1"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              <span>Edit Filing Date</span>
+                            </button>
+                          )}
 
-                        {ev.category === 'ORDER' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const rawId = ev.id.replace('order-', '');
-                              const found = orders.find((o) => o.id === rawId);
-                              setTargetOrder(found || null);
-                              setOrderModalOpen(true);
-                            }}
-                            className="text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 font-semibold flex items-center gap-1"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            <span>Edit Order</span>
-                          </button>
-                        )}
+                          {ev.category === 'ORDER' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const rawId = ev.id.replace('order-', '');
+                                const found = orders.find((o) => o.id === rawId);
+                                setTargetOrder(found || null);
+                                setOrderModalOpen(true);
+                              }}
+                              className="text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 font-semibold flex items-center gap-1"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              <span>Edit Order</span>
+                            </button>
+                          )}
 
-                        {ev.category === 'DEADLINE' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const rawId = ev.id.replace('deadline-', '');
-                              const found = deadlines.find((d) => d.id === rawId);
-                              if (found) {
-                                setTargetDeadline(found);
-                                setDeadlineModalOpen(true);
-                              }
-                            }}
-                            className="text-purple-600 hover:text-purple-800 dark:text-purple-400 dark:hover:text-purple-300 font-semibold flex items-center gap-1"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            <span>Edit Deadline</span>
-                          </button>
-                        )}
+                          {ev.category === 'DEADLINE' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const rawId = ev.id.replace('deadline-', '');
+                                const found = deadlines.find((d) => d.id === rawId);
+                                if (found) {
+                                  setTargetDeadline(found);
+                                  setDeadlineModalOpen(true);
+                                }
+                              }}
+                              className="text-purple-600 hover:text-purple-800 dark:text-purple-400 dark:hover:text-purple-300 font-semibold flex items-center gap-1"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              <span>Edit Deadline</span>
+                            </button>
+                          )}
 
-                        {ev.category === 'MILESTONE' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const rawId = ev.id.replace('timeline-', '');
-                              setTargetMilestone({
-                                id: rawId,
-                                date: ev.date,
-                                title: ev.title,
-                                detail: ev.detail,
-                                category: ev.badge,
-                              });
-                              setMilestoneModalOpen(true);
-                            }}
-                            className="text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 font-semibold flex items-center gap-1"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            <span>Edit Milestone</span>
-                          </button>
-                        )}
-                      </div>
+                          {ev.category === 'MILESTONE' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const rawId = ev.id.replace('timeline-', '');
+                                setTargetMilestone({
+                                  id: rawId,
+                                  date: ev.date,
+                                  title: ev.title,
+                                  detail: ev.detail,
+                                  category: ev.badge,
+                                });
+                                setMilestoneModalOpen(true);
+                              }}
+                              className="text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 font-semibold flex items-center gap-1"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              <span>Edit Milestone</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -977,52 +1011,54 @@ export const CaseDetailView: React.FC = () => {
           </div>
 
           {/* Add Party Inline Form */}
-          <form onSubmit={handleAddParty} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-3">
-            <div className="text-xs font-bold text-slate-700 dark:text-slate-300">Add Party</div>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-              <input
-                type="text"
-                required
-                value={newPartyName}
-                onChange={(e) => setNewPartyName(e.target.value)}
-                placeholder="Party Name"
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
-              />
-              <select
-                value={newPartySide}
-                onChange={(e) => setNewPartySide(e.target.value as any)}
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
-              >
-                <option value="OPPOSITE">Opposite Side</option>
-                <option value="OURS">Our Side</option>
-                <option value="OTHER">Other / Proforma</option>
-              </select>
-              <input
-                type="text"
-                required
-                value={newPartyRole}
-                onChange={(e) => setNewPartyRole(e.target.value)}
-                placeholder="Role (e.g. Defendant No. 1)"
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
-              />
-              <input
-                type="text"
-                value={newPartyCounsel}
-                onChange={(e) => setNewPartyCounsel(e.target.value)}
-                placeholder="Counsel Name &amp; Contact"
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
-              />
-            </div>
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={addingParty}
-                className="px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
-              >
-                {addingParty ? 'Adding...' : 'Add Party'}
-              </button>
-            </div>
-          </form>
+          {canEdit && (
+            <form onSubmit={handleAddParty} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-3">
+              <div className="text-xs font-bold text-slate-700 dark:text-slate-300">Add Party</div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                <input
+                  type="text"
+                  required
+                  value={newPartyName}
+                  onChange={(e) => setNewPartyName(e.target.value)}
+                  placeholder="Party Name"
+                  className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
+                />
+                <select
+                  value={newPartySide}
+                  onChange={(e) => setNewPartySide(e.target.value as any)}
+                  className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
+                >
+                  <option value="OPPOSITE">Opposite Side</option>
+                  <option value="OURS">Our Side</option>
+                  <option value="OTHER">Other / Proforma</option>
+                </select>
+                <input
+                  type="text"
+                  required
+                  value={newPartyRole}
+                  onChange={(e) => setNewPartyRole(e.target.value)}
+                  placeholder="Role (e.g. Defendant No. 1)"
+                  className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
+                />
+                <input
+                  type="text"
+                  value={newPartyCounsel}
+                  onChange={(e) => setNewPartyCounsel(e.target.value)}
+                  placeholder="Counsel Name &amp; Contact"
+                  className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
+                />
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={addingParty}
+                  className="px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
+                >
+                  {addingParty ? 'Adding...' : 'Add Party'}
+                </button>
+              </div>
+            </form>
+          )}
 
           <div className="divide-y divide-slate-100 dark:divide-slate-800">
             {parties.map((p) => (
@@ -1043,17 +1079,19 @@ export const CaseDetailView: React.FC = () => {
                   }`}>
                     {p.side}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTargetParty(p);
-                      setPartyModalOpen(true);
-                    }}
-                    className="p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 rounded transition"
-                    title="Edit Party"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTargetParty(p);
+                        setPartyModalOpen(true);
+                      }}
+                      className="p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 rounded transition"
+                      title="Edit Party"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -1071,63 +1109,65 @@ export const CaseDetailView: React.FC = () => {
           </div>
 
           {/* Quick Add Deadline Form */}
-          <form onSubmit={handleAddDeadline} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-3">
-            <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
-              Add New Deadline (Mandatory Owner &amp; Backup Owner)
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
-              <input
-                type="text"
-                required
-                value={newDlTitle}
-                onChange={(e) => setNewDlTitle(e.target.value)}
-                placeholder="Title (e.g. 30 days to file WS)"
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg lg:col-span-2"
-              />
-              <input
-                type="date"
-                required
-                value={newDlDate}
-                onChange={(e) => setNewDlDate(e.target.value)}
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
-              />
-              <select
-                required
-                value={newDlOwner}
-                onChange={(e) => setNewDlOwner(e.target.value)}
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
-              >
-                <option value="">Owner (Required)</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.display_name}
-                  </option>
-                ))}
-              </select>
-              <select
-                required
-                value={newDlBackup}
-                onChange={(e) => setNewDlBackup(e.target.value)}
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
-              >
-                <option value="">Backup (Required)</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.display_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={addingDl}
-                className="px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
-              >
-                {addingDl ? 'Saving...' : 'Add Deadline'}
-              </button>
-            </div>
-          </form>
+          {canEdit && (
+            <form onSubmit={handleAddDeadline} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-3">
+              <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                Add New Deadline (Mandatory Owner &amp; Backup Owner)
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+                <input
+                  type="text"
+                  required
+                  value={newDlTitle}
+                  onChange={(e) => setNewDlTitle(e.target.value)}
+                  placeholder="Title (e.g. 30 days to file WS)"
+                  className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg lg:col-span-2"
+                />
+                <input
+                  type="date"
+                  required
+                  value={newDlDate}
+                  onChange={(e) => setNewDlDate(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
+                />
+                <select
+                  required
+                  value={newDlOwner}
+                  onChange={(e) => setNewDlOwner(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
+                >
+                  <option value="">Owner (Required)</option>
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.display_name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  required
+                  value={newDlBackup}
+                  onChange={(e) => setNewDlBackup(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
+                >
+                  <option value="">Backup (Required)</option>
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.display_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={addingDl}
+                  className="px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
+                >
+                  {addingDl ? 'Saving...' : 'Add Deadline'}
+                </button>
+              </div>
+            </form>
+          )}
 
           {deadlines.length === 0 ? (
             <div className="py-8 text-center text-xs text-slate-400">No deadlines recorded.</div>
@@ -1152,17 +1192,19 @@ export const CaseDetailView: React.FC = () => {
                     }`}>
                       {dl.status}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTargetDeadline(dl);
-                        setDeadlineModalOpen(true);
-                      }}
-                      className="p-1 text-slate-400 hover:text-purple-600 dark:hover:text-purple-400 rounded transition"
-                      title="Edit Deadline"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTargetDeadline(dl);
+                          setDeadlineModalOpen(true);
+                        }}
+                        className="p-1 text-slate-400 hover:text-purple-600 dark:hover:text-purple-400 rounded transition"
+                        title="Edit Deadline"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1183,32 +1225,36 @@ export const CaseDetailView: React.FC = () => {
                 Comprehensive record of past and upcoming court appearances
               </p>
             </div>
-            <button
-              onClick={() => {
-                setTargetHearing(null);
-                setUpdateHearingOpen(true);
-              }}
-              className="px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition flex items-center gap-1.5 shadow-xs"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Record Court Hearing</span>
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => {
+                  setTargetHearing(null);
+                  setUpdateHearingOpen(true);
+                }}
+                className="px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition flex items-center gap-1.5 shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Record Court Hearing</span>
+              </button>
+            )}
           </div>
 
           {hearings.length === 0 ? (
             <div className="py-12 text-center text-xs text-slate-400 space-y-2">
               <Calendar className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto" />
               <div>No hearings logged yet for this matter.</div>
-              <button
-                type="button"
-                onClick={() => {
-                  setTargetHearing(null);
-                  setUpdateHearingOpen(true);
-                }}
-                className="text-xs font-semibold text-indigo-600 hover:underline"
-              >
-                + Record First Hearing
-              </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTargetHearing(null);
+                    setUpdateHearingOpen(true);
+                  }}
+                  className="text-xs font-semibold text-indigo-600 hover:underline"
+                >
+                  + Record First Hearing
+                </button>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -1233,38 +1279,42 @@ export const CaseDetailView: React.FC = () => {
                           Next: {clock.formatDisplay(h.next_date)} ({h.next_purpose || 'Orders'})
                         </span>
                       )}
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (!confirm(`Are you sure you want to delete the hearing on ${clock.formatDisplay(h.hearing_date)}?`)) return;
-                          try {
-                            await deleteHearing(h.id);
-                            loadCase();
-                          } catch (e: any) {
-                            alert(e.message);
-                          }
-                        }}
-                        className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
-                        title="Delete Hearing"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm(`Are you sure you want to delete the hearing on ${clock.formatDisplay(h.hearing_date)}?`)) return;
+                            try {
+                              await deleteHearing(h.id);
+                              loadCase();
+                            } catch (e: any) {
+                              alert(e.message);
+                            }
+                          }}
+                          className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                          title="Delete Hearing"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
                   {h.outcome && h.outcome.trim() ? (
                     <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-700/60 rounded-lg text-xs text-slate-700 dark:text-slate-300 flex items-start justify-between gap-3">
                       <div className="whitespace-pre-wrap flex-1">{h.outcome}</div>
-                      <button
-                        onClick={() => {
-                          setTargetHearing(h);
-                          setUpdateHearingOpen(true);
-                        }}
-                        className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold shrink-0 flex items-center gap-1"
-                      >
-                        <Edit2 className="w-3 h-3" />
-                        <span>Edit Hearing &amp; Outcome</span>
-                      </button>
+                      {canEdit && (
+                        <button
+                          onClick={() => {
+                            setTargetHearing(h);
+                            setUpdateHearingOpen(true);
+                          }}
+                          className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold shrink-0 flex items-center gap-1"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                          <span>Edit Hearing &amp; Outcome</span>
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="flex items-center justify-between text-xs text-amber-600 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2 rounded-lg border border-amber-200/60 dark:border-amber-800/40">
@@ -1272,17 +1322,19 @@ export const CaseDetailView: React.FC = () => {
                         <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                         <span>Outcome pending record</span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => {
-                            setTargetHearing(h);
-                            setUpdateHearingOpen(true);
-                          }}
-                          className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded transition"
-                        >
-                          Log Outcome
-                        </button>
-                      </div>
+                      {canEdit && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setTargetHearing(h);
+                              setUpdateHearingOpen(true);
+                            }}
+                            className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded transition"
+                          >
+                            Log Outcome
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1314,32 +1366,36 @@ export const CaseDetailView: React.FC = () => {
                 Track ad-interim reliefs, injunctions, directions, and decree obligations
               </p>
             </div>
-            <button
-              onClick={() => {
-                setTargetOrder(null);
-                setOrderModalOpen(true);
-              }}
-              className="px-3.5 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition flex items-center gap-1.5 shadow-xs"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Record Order</span>
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => {
+                  setTargetOrder(null);
+                  setOrderModalOpen(true);
+                }}
+                className="px-3.5 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition flex items-center gap-1.5 shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Record Order</span>
+              </button>
+            )}
           </div>
 
           {orders.length === 0 ? (
             <div className="py-12 text-center text-xs text-slate-400 space-y-2">
               <FileText className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto" />
               <div>No orders logged for this matter.</div>
-              <button
-                type="button"
-                onClick={() => {
-                  setTargetOrder(null);
-                  setOrderModalOpen(true);
-                }}
-                className="text-xs font-semibold text-emerald-600 hover:underline"
-              >
-                + Record First Order
-              </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTargetOrder(null);
+                    setOrderModalOpen(true);
+                  }}
+                  className="text-xs font-semibold text-emerald-600 hover:underline"
+                >
+                  + Record First Order
+                </button>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -1365,35 +1421,37 @@ export const CaseDetailView: React.FC = () => {
                       </div>
                     )}
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTargetOrder(ord);
-                        setOrderModalOpen(true);
-                      }}
-                      className="p-1 text-slate-400 hover:text-emerald-600 rounded transition"
-                      title="Edit Order"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!confirm(`Are you sure you want to delete order from ${clock.formatDisplay(ord.order_date)}?`)) return;
-                        try {
-                          await deleteOrder(ord.id);
-                          loadCase();
-                        } catch (e: any) {
-                          alert(e.message);
-                        }
-                      }}
-                      className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
-                      title="Delete Order"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  {canEdit && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTargetOrder(ord);
+                          setOrderModalOpen(true);
+                        }}
+                        className="p-1 text-slate-400 hover:text-emerald-600 rounded transition"
+                        title="Edit Order"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm(`Are you sure you want to delete order from ${clock.formatDisplay(ord.order_date)}?`)) return;
+                          try {
+                            await deleteOrder(ord.id);
+                            loadCase();
+                          } catch (e: any) {
+                            alert(e.message);
+                          }
+                        }}
+                        className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                        title="Delete Order"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1402,7 +1460,7 @@ export const CaseDetailView: React.FC = () => {
       )}
 
       {/* TAB 6: INTERNAL NOTES */}
-      {activeTab === 'notes' && !isFinance(currentUser) && (
+      {activeTab === 'notes' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
             <div>
@@ -1410,30 +1468,32 @@ export const CaseDetailView: React.FC = () => {
                 Privileged Counsel Notes
               </h3>
               <p className="text-[11px] text-slate-500">
-                Confidential strategist thoughts (RLS protected; never visible to Finance or clients)
+                Confidential strategist thoughts (RLS protected; privileged firm counsel reference)
               </p>
             </div>
           </div>
 
-          <form onSubmit={handleAddNote} className="space-y-2">
-            <textarea
-              required
-              rows={3}
-              value={newNoteText}
-              onChange={(e) => setNewNoteText(e.target.value)}
-              placeholder="Record privileged trial strategies, witness assessments, or bench observations..."
-              className="w-full p-3 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
-            />
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={addingNote}
-                className="px-4 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
-              >
-                {addingNote ? 'Saving Note...' : 'Save Privileged Note'}
-              </button>
-            </div>
-          </form>
+          {canEdit && (
+            <form onSubmit={handleAddNote} className="space-y-2">
+              <textarea
+                required
+                rows={3}
+                value={newNoteText}
+                onChange={(e) => setNewNoteText(e.target.value)}
+                placeholder="Record privileged trial strategies, witness assessments, or bench observations..."
+                className="w-full p-3 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
+              />
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={addingNote}
+                  className="px-4 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
+                >
+                  {addingNote ? 'Saving Note...' : 'Save Privileged Note'}
+                </button>
+              </div>
+            </form>
+          )}
 
           <div className="space-y-3 pt-2">
             {notes.map((n) => (
@@ -1447,33 +1507,37 @@ export const CaseDetailView: React.FC = () => {
                   </span>
                   <div className="flex items-center gap-2">
                     <span>{clock.formatDisplay(n.created_at)}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingNoteId(n.id);
-                        setEditingNoteText(n.note);
-                      }}
-                      className="p-1 text-slate-400 hover:text-indigo-600 rounded transition"
-                      title="Edit Note"
-                    >
-                      <Edit2 className="w-3 h-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!confirm('Are you sure you want to delete this privileged note?')) return;
-                        try {
-                          await deleteInternalNote(n.id);
-                          loadCase();
-                        } catch (e: any) {
-                          alert(e.message);
-                        }
-                      }}
-                      className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
-                      title="Delete Note"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingNoteId(n.id);
+                          setEditingNoteText(n.note);
+                        }}
+                        className="p-1 text-slate-400 hover:text-indigo-600 rounded transition"
+                        title="Edit Note"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </button>
+                    )}
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm('Are you sure you want to delete this privileged note?')) return;
+                          try {
+                            await deleteInternalNote(n.id);
+                            loadCase();
+                          } catch (e: any) {
+                            alert(e.message);
+                          }
+                        }}
+                        className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                        title="Delete Note"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -1544,43 +1608,45 @@ export const CaseDetailView: React.FC = () => {
           </div>
 
           {/* Add Client Note Form */}
-          <form onSubmit={handleAddClientNote} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 rounded-xl space-y-3">
-            <div className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-              <span>Post New Client Update</span>
-              <span className="text-[10px] text-slate-400 font-normal">
-                Will be surfaced to client portal
-              </span>
-            </div>
-            <div>
-              <input
-                type="text"
-                value={newClientNoteTitle}
-                onChange={(e) => setNewClientNoteTitle(e.target.value)}
-                placeholder="Subject / Update Title (e.g. Court arguments completed; Next date fixed)"
-                className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
-              />
-            </div>
-            <div>
-              <textarea
-                required
-                rows={3}
-                value={newClientNoteText}
-                onChange={(e) => setNewClientNoteText(e.target.value)}
-                placeholder="Write plain-language client update without internal privileged counsel notes..."
-                className="w-full p-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
-              />
-            </div>
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={addingClientNote}
-                className="px-4 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm shadow-emerald-600/30 transition flex items-center gap-1.5 disabled:opacity-50"
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                <span>{addingClientNote ? 'Publishing...' : 'Add Client Note'}</span>
-              </button>
-            </div>
-          </form>
+          {canEdit && (
+            <form onSubmit={handleAddClientNote} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 rounded-xl space-y-3">
+              <div className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                <span>Post New Client Update</span>
+                <span className="text-[10px] text-slate-400 font-normal">
+                  Will be surfaced to client portal
+                </span>
+              </div>
+              <div>
+                <input
+                  type="text"
+                  value={newClientNoteTitle}
+                  onChange={(e) => setNewClientNoteTitle(e.target.value)}
+                  placeholder="Subject / Update Title (e.g. Court arguments completed; Next date fixed)"
+                  className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                />
+              </div>
+              <div>
+                <textarea
+                  required
+                  rows={3}
+                  value={newClientNoteText}
+                  onChange={(e) => setNewClientNoteText(e.target.value)}
+                  placeholder="Write plain-language client update without internal privileged counsel notes..."
+                  className="w-full p-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
+                />
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={addingClientNote}
+                  className="px-4 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm shadow-emerald-600/30 transition flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>{addingClientNote ? 'Publishing...' : 'Add Client Note'}</span>
+                </button>
+              </div>
+            </form>
+          )}
 
           {/* List of client notes */}
           {clientNotes.length === 0 ? (
@@ -1610,33 +1676,37 @@ export const CaseDetailView: React.FC = () => {
                       <span className="text-[11px] text-slate-400">
                         {clock.formatDisplay(cn.created_at)}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingClientNoteId(cn.id);
-                          setEditingClientNoteText(cn.note);
-                        }}
-                        className="p-1 text-slate-400 hover:text-emerald-600 rounded transition"
-                        title="Edit Client Note"
-                      >
-                        <Edit2 className="w-3 h-3" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (!confirm('Are you sure you want to delete this client note?')) return;
-                          try {
-                            await deleteClientNote(cn.id);
-                            loadCase();
-                          } catch (e: any) {
-                            alert(e.message);
-                          }
-                        }}
-                        className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
-                        title="Delete Client Note"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingClientNoteId(cn.id);
+                            setEditingClientNoteText(cn.note);
+                          }}
+                          className="p-1 text-slate-400 hover:text-emerald-600 rounded transition"
+                          title="Edit Client Note"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                      )}
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm('Are you sure you want to delete this client note?')) return;
+                            try {
+                              await deleteClientNote(cn.id);
+                              loadCase();
+                            } catch (e: any) {
+                              alert(e.message);
+                            }
+                          }}
+                          className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                          title="Delete Client Note"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1710,39 +1780,41 @@ export const CaseDetailView: React.FC = () => {
             </div>
 
             {/* Upload Selector */}
-            <div className="flex items-center gap-2">
-              <select
-                value={uploadCategory}
-                onChange={(e) => setUploadCategory(e.target.value)}
-                className="px-2.5 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
-              >
-                {LITIGATION_FILE_CATEGORIES.map((cat) => (
-                  <option key={cat} value={cat}>
-                    Category: {cat}
-                  </option>
-                ))}
-              </select>
+            {canEdit && (
+              <div className="flex items-center gap-2">
+                <select
+                  value={uploadCategory}
+                  onChange={(e) => setUploadCategory(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                >
+                  {LITIGATION_FILE_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      Category: {cat}
+                    </option>
+                  ))}
+                </select>
 
-              <label className="cursor-pointer px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition">
-                <Upload className="w-3.5 h-3.5" />
-                <span>{uploadingFile ? 'Uploading...' : 'Upload Document'}</span>
-                <input
-                  type="file"
-                  onChange={handleFileUpload}
-                  disabled={uploadingFile}
-                  className="hidden"
-                />
-              </label>
-            </div>
+                <label className="cursor-pointer px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{uploadingFile ? 'Uploading...' : 'Upload Document'}</span>
+                  <input
+                    type="file"
+                    onChange={handleFileUpload}
+                    disabled={uploadingFile}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            )}
           </div>
 
-          {documents.length === 0 ? (
+          {visibleDocuments.length === 0 ? (
             <div className="py-12 text-center text-xs text-slate-400">
               No documents uploaded yet in this matter.
             </div>
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {documents.map((doc) => (
+              {visibleDocuments.map((doc) => (
                 <div key={doc.id} className="py-3 flex items-center justify-between">
                   <div className="space-y-0.5">
                     <div className="font-semibold text-xs text-slate-900 dark:text-slate-100 flex items-center gap-2">
@@ -1794,38 +1866,40 @@ export const CaseDetailView: React.FC = () => {
           </div>
 
           {/* Add Linked IP Form */}
-          <form onSubmit={handleAddLinkedIp} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-3">
-            <div className="text-xs font-bold text-slate-700 dark:text-slate-300">Attach IP Reference</div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <input
-                type="text"
-                required
-                value={newIpRef}
-                onChange={(e) => setNewIpRef(e.target.value)}
-                placeholder="IP Application / Reg No. (e.g. IN-PAT-20244100202)"
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg sm:col-span-2 font-mono"
-              />
-              <select
-                value={newIpRelation}
-                onChange={(e) => setNewIpRelation(e.target.value as any)}
-                className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
-              >
-                <option value="ENFORCES">ENFORCES (Patent/TM Infringement)</option>
-                <option value="DEFENDS">DEFENDS</option>
-                <option value="CHALLENGES">CHALLENGES (Rectification/Revocation)</option>
-                <option value="OTHER">OTHER</option>
-              </select>
-            </div>
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={addingIp}
-                className="px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
-              >
-                {addingIp ? 'Attaching...' : 'Attach IP Asset'}
-              </button>
-            </div>
-          </form>
+          {canEdit && (
+            <form onSubmit={handleAddLinkedIp} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-3">
+              <div className="text-xs font-bold text-slate-700 dark:text-slate-300">Attach IP Reference</div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <input
+                  type="text"
+                  required
+                  value={newIpRef}
+                  onChange={(e) => setNewIpRef(e.target.value)}
+                  placeholder="IP Application / Reg No. (e.g. IN-PAT-20244100202)"
+                  className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg sm:col-span-2 font-mono"
+                />
+                <select
+                  value={newIpRelation}
+                  onChange={(e) => setNewIpRelation(e.target.value as any)}
+                  className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
+                >
+                  <option value="ENFORCES">ENFORCES (Patent/TM Infringement)</option>
+                  <option value="DEFENDS">DEFENDS</option>
+                  <option value="CHALLENGES">CHALLENGES (Rectification/Revocation)</option>
+                  <option value="OTHER">OTHER</option>
+                </select>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={addingIp}
+                  className="px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
+                >
+                  {addingIp ? 'Attaching...' : 'Attach IP Asset'}
+                </button>
+              </div>
+            </form>
+          )}
 
           {linkedIp.length === 0 ? (
             <div className="py-8 text-center text-xs text-slate-400">

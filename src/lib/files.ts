@@ -220,3 +220,14 @@ export async function fetchProjectDocuments(projectCodeId: string): Promise<Core
   }
   return results;
 }
+
+/**
+ * Delete a project document
+ */
+export async function deleteProjectDocument(docId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    await coreDb.from('documents').delete().eq('id', docId);
+  }
+  mockFileStore.delete(docId);
+}
+

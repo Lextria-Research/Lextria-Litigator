@@ -15,7 +15,7 @@ import {
 import { fetchCases, fetchClients, fetchProfiles } from '../../lib/api';
 import { clock } from '../../lib/clock';
 import { formatINRShort } from '../../lib/currency';
-import { getStoredUser, isSuperAdminOrFinance } from '../../lib/auth';
+import { getStoredUser, isSuperAdminOrFinance, canEditCaseData } from '../../lib/auth';
 import { CASE_STAGES, CaseRecord, CoreClient, CoreProfile } from '../../lib/types';
 import { NewCaseModal } from './NewCaseModal';
 
@@ -23,6 +23,7 @@ export const CasesListView: React.FC = () => {
   const navigate = useNavigate();
   const currentUser = getStoredUser();
   const canViewQuotation = isSuperAdminOrFinance(currentUser);
+  const canEdit = canEditCaseData(currentUser);
 
   const [cases, setCases] = useState<CaseRecord[]>([]);
   const [clients, setClients] = useState<CoreClient[]>([]);
@@ -116,14 +117,16 @@ export const CasesListView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setNewCaseOpen(true)}
-          className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm shadow-indigo-600/30 transition"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>New Case Docket</span>
-        </button>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => setNewCaseOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm shadow-indigo-600/30 transition"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>New Case Docket</span>
+          </button>
+        )}
       </div>
 
       {/* Filter Bar */}
