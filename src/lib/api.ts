@@ -701,6 +701,7 @@ export async function updateCase(
 // ==========================================
 
 export async function fetchHearings(caseId: string): Promise<HearingRecord[]> {
+  let list: HearingRecord[] = [];
   const { data, error } = await litigatorDb
     .from('hearings_view')
     .select('*')
@@ -708,16 +709,35 @@ export async function fetchHearings(caseId: string): Promise<HearingRecord[]> {
     .order('hearing_date', { ascending: false });
 
   if (!error && data) {
-    return data as HearingRecord[];
+    list = data as HearingRecord[];
+  } else {
+    const { data: rawH, error: hErr } = await litigatorDb
+      .from('hearings')
+      .select('*')
+      .eq('case_id', caseId)
+      .order('hearing_date', { ascending: false });
+    if (hErr) throw hErr;
+    list = await enrichHearings(rawH || []);
   }
 
-  const { data: rawH, error: hErr } = await litigatorDb
-    .from('hearings')
-    .select('*')
-    .eq('case_id', caseId)
-    .order('hearing_date', { ascending: false });
-  if (hErr) throw hErr;
-  return enrichHearings(rawH || []);
+  // Deduplicate by hearing_date: if multiple records exist on the same date, prefer the one with an outcome
+  const dateMap = new Map<string, HearingRecord>();
+  for (const h of list) {
+    const existing = dateMap.get(h.hearing_date);
+    if (!existing) {
+      dateMap.set(h.hearing_date, h);
+    } else {
+      const existingHasOutcome = Boolean(existing.outcome && existing.outcome.trim());
+      const currentHasOutcome = Boolean(h.outcome && h.outcome.trim());
+      if (!existingHasOutcome && currentHasOutcome) {
+        dateMap.set(h.hearing_date, h);
+      }
+    }
+  }
+
+  return Array.from(dateMap.values()).sort(
+    (a, b) => new Date(b.hearing_date).getTime() - new Date(a.hearing_date).getTime()
+  );
 }
 
 export async function updateAfterHearing(params: {
@@ -1516,19 +1536,41 @@ export async function fetchTodayDashboard(todayStr: string, next7Days: string) {
   const allD = dData || [];
 
   const rawUnupdated = unData || [];
+
+  // Deduplicate and filter out hearings where an outcome is already logged on that date for that case
+  const caseIds = Array.from(new Set(rawUnupdated.map((h: any) => h.case_id).filter(Boolean)));
+  let loggedHearings: any[] = [];
+  if (caseIds.length > 0) {
+    const { data: loggedH } = await litigatorDb
+      .from('hearings')
+      .select('case_id, hearing_date, outcome')
+      .in('case_id', caseIds)
+      .not('outcome', 'is', null);
+    loggedHearings = (loggedH || []).filter(
+      (h: any) => h.outcome && typeof h.outcome === 'string' && h.outcome.trim() !== ''
+    );
+  }
+
+  const seenKeys = new Set<string>();
   const filteredUnupdated = rawUnupdated.filter((h: any) => {
+    // 1. If hearing has an outcome, skip
     if (h.outcome && typeof h.outcome === 'string' && h.outcome.trim() !== '') {
       return false;
     }
-    const hasLoggedSameDay = allH.some(
-      (todayH: any) =>
-        todayH.case_id === h.case_id &&
-        todayH.hearing_date === h.hearing_date &&
-        todayH.outcome &&
-        typeof todayH.outcome === 'string' &&
-        todayH.outcome.trim() !== ''
+    // 2. If another hearing record exists for this case on the same date with an outcome, skip
+    const alreadyLoggedOnSameDate = loggedHearings.some(
+      (lh: any) => lh.case_id === h.case_id && lh.hearing_date === h.hearing_date
     );
-    if (hasLoggedSameDay) return false;
+    if (alreadyLoggedOnSameDate) {
+      return false;
+    }
+    // 3. Deduplicate multiple empty rows on the exact same case and date
+    const key = `${h.case_id}_${h.hearing_date}`;
+    if (seenKeys.has(key)) {
+      return false;
+    }
+    seenKeys.add(key);
+
     return true;
   });
 
