@@ -4,6 +4,7 @@ import { X, Calendar, Upload, Check, AlertCircle, Trash2 } from 'lucide-react';
 import { updateAfterHearing, deleteHearing, fetchProfiles } from '../../lib/api';
 import { uploadLitigatorFile } from '../../lib/files';
 import { clock } from '../../lib/clock';
+import { formatProfileRole } from '../../lib/auth';
 import type { CoreProfile } from '../../lib/types';
 
 interface UpdateHearingModalProps {
@@ -191,7 +192,7 @@ export const UpdateHearingModal: React.FC<UpdateHearingModalProps> = ({
                 <option value="">Select counsel...</option>
                 {profiles.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.display_name} ({p.role})
+                    {p.display_name} ({formatProfileRole(p)})
                   </option>
                 ))}
               </select>

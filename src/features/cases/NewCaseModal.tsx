@@ -6,8 +6,7 @@ import {
   createCase,
   fetchProfiles,
 } from '../../lib/api';
-import { clock } from '../../lib/clock';
-import { getStoredUser, isSuperAdminOrFinance } from '../../lib/auth';
+import { getStoredUser, isSuperAdminOrFinance, formatProfileRole } from '../../lib/auth';
 import type { CoreClient, CoreProfile, CaseType, ClientRole } from '../../lib/types';
 
 interface NewCaseModalProps {
@@ -426,7 +425,7 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
                 <option value="">Select counsel...</option>
                 {profiles.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.display_name} ({p.role})
+                    {p.display_name} ({formatProfileRole(p)})
                   </option>
                 ))}
               </select>

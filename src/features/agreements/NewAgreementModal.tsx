@@ -8,6 +8,7 @@ import {
   fetchProfiles,
 } from '../../lib/api';
 import type { CoreClient, CoreProfile, AgreementType } from '../../lib/types';
+import { formatProfileRole } from '../../lib/auth';
 
 interface NewAgreementModalProps {
   isOpen: boolean;
@@ -318,10 +319,10 @@ export const NewAgreementModal: React.FC<NewAgreementModalProps> = ({
                 onChange={(e) => setLeadUserId(e.target.value)}
                 className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
               >
-                <option value="">Select counsel...</option>
+                <option value="">Select assignee / drafter...</option>
                 {profiles.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.display_name} ({p.role})
+                    {p.display_name} ({formatProfileRole(p)})
                   </option>
                 ))}
               </select>
@@ -339,7 +340,7 @@ export const NewAgreementModal: React.FC<NewAgreementModalProps> = ({
                 <option value="">Select reviewer...</option>
                 {profiles.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.display_name} ({p.role})
+                    {p.display_name} ({formatProfileRole(p)})
                   </option>
                 ))}
               </select>

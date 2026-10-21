@@ -2,9 +2,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Shield,
-  Users,
   Coins,
   Scale,
+  FileText,
   Plus,
   Trash2,
   CheckCircle2,
@@ -12,12 +12,11 @@ import {
   Mail,
   Lock,
   User,
-  Building,
   AlertTriangle,
   Info,
 } from 'lucide-react';
 import { fetchProfiles, createTeamUser, deleteTeamUser } from '../../lib/api';
-import { getStoredUser, canManageTeam, isSuperAdmin } from '../../lib/auth';
+import { getStoredUser, canManageTeam, formatProfileRole } from '../../lib/auth';
 import type { CoreProfile } from '../../lib/types';
 
 export const SettingsView: React.FC = () => {
@@ -33,8 +32,9 @@ export const SettingsView: React.FC = () => {
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [newRole, setNewRole] = useState<'SUPER_ADMIN' | 'FINANCE' | 'ASSOCIATE'>('ASSOCIATE');
-  const [newDept, setNewDept] = useState<'LITIGATION' | 'FINANCE' | 'MANAGEMENT'>('LITIGATION');
+  const [roleScope, setRoleScope] = useState<
+    'LITIGATION_ASSOCIATE' | 'AGREEMENT_ASSOCIATE' | 'FINANCE' | 'SUPER_ADMIN'
+  >('LITIGATION_ASSOCIATE');
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -64,16 +64,19 @@ export const SettingsView: React.FC = () => {
     return profiles.filter((p) => p.role === 'FINANCE').length;
   }, [profiles]);
 
-  const associateCount = useMemo(() => {
-    return profiles.filter((p) => p.role === 'ASSOCIATE').length;
+  const litigationCount = useMemo(() => {
+    return profiles.filter((p) => p.role === 'ASSOCIATE' && p.department !== 'AGREEMENT').length;
+  }, [profiles]);
+
+  const agreementsCount = useMemo(() => {
+    return profiles.filter((p) => p.role === 'ASSOCIATE' && p.department === 'AGREEMENT').length;
   }, [profiles]);
 
   const handleOpenAddModal = () => {
     setNewName('');
     setNewEmail('');
     setNewPassword('');
-    setNewRole('ASSOCIATE');
-    setNewDept('LITIGATION');
+    setRoleScope('LITIGATION_ASSOCIATE');
     setModalError(null);
     setAddModalOpen(true);
   };
@@ -90,7 +93,7 @@ export const SettingsView: React.FC = () => {
       return;
     }
 
-    if (newRole === 'SUPER_ADMIN' && superAdminCount >= 2) {
+    if (roleScope === 'SUPER_ADMIN' && superAdminCount >= 2) {
       setModalError('Maximum limit of 2 Super Admins reached. Only two Super Admins can exist at a time.');
       return;
     }
@@ -98,13 +101,30 @@ export const SettingsView: React.FC = () => {
     setSubmitting(true);
     setModalError(null);
 
+    let role: 'SUPER_ADMIN' | 'FINANCE' | 'ASSOCIATE' = 'ASSOCIATE';
+    let department = 'LITIGATION';
+
+    if (roleScope === 'SUPER_ADMIN') {
+      role = 'SUPER_ADMIN';
+      department = 'MANAGEMENT';
+    } else if (roleScope === 'FINANCE') {
+      role = 'FINANCE';
+      department = 'FINANCE';
+    } else if (roleScope === 'AGREEMENT_ASSOCIATE') {
+      role = 'ASSOCIATE';
+      department = 'AGREEMENT';
+    } else {
+      role = 'ASSOCIATE';
+      department = 'LITIGATION';
+    }
+
     try {
       await createTeamUser({
         displayName: newName.trim(),
         email: newEmail.trim().toLowerCase(),
         password: newPassword.trim(),
-        role: newRole,
-        department: newDept,
+        role,
+        department,
       });
 
       setAddModalOpen(false);
@@ -133,11 +153,15 @@ export const SettingsView: React.FC = () => {
     if (!confirmed) return;
 
     setDeletingId(profile.id);
+    // Optimistic local update so UI responds immediately
+    setProfiles((prev) => prev.filter((p) => p.id !== profile.id));
+
     try {
       await deleteTeamUser(profile.id);
       await loadProfiles();
     } catch (err: any) {
       alert(`Could not delete user: ${err?.message}`);
+      await loadProfiles();
     } finally {
       setDeletingId(null);
     }
@@ -157,7 +181,7 @@ export const SettingsView: React.FC = () => {
             </h1>
           </div>
           <p className="text-xs text-slate-500 mt-1 max-w-2xl">
-            Configure firm team member accounts, enforce role policies, and manage operational access across the portal.
+            Configure firm team accounts, enforce role policies, and manage operational access across the portal.
           </p>
         </div>
 
@@ -173,8 +197,8 @@ export const SettingsView: React.FC = () => {
         )}
       </div>
 
-      {/* Role Policy Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Role Policy Summary Cards (4 Roles) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Super Admin */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3 shadow-xs">
           <div className="flex items-center justify-between">
@@ -184,21 +208,23 @@ export const SettingsView: React.FC = () => {
               </div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Super Admin</h3>
             </div>
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-              superAdminCount >= 2
-                ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800'
-                : 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-800'
-            }`}>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                superAdminCount >= 2
+                  ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800'
+                  : 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-800'
+              }`}
+            >
               {superAdminCount} / 2 Active
             </span>
           </div>
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Full administrative control over all court cases, hearings, pleadings, quotation documents &amp; fee agreements, and user management.
+          <p className="text-xs text-slate-500 leading-relaxed min-h-[48px]">
+            Full administrative control over all court cases, agreements, hearings, quotation documents, and user management.
           </p>
           <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-400 space-y-1">
             <div className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 font-medium">
               <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-              <span>Full case editing &amp; team management</span>
+              <span>Full editing &amp; team management</span>
             </div>
             <div className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 font-medium">
               <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
@@ -220,17 +246,17 @@ export const SettingsView: React.FC = () => {
               {financeCount} Active
             </span>
           </div>
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Read-only visibility across all litigation cases, progression timelines, hearings, orders, and notes. Full control over quotation documents.
+          <p className="text-xs text-slate-500 leading-relaxed min-h-[48px]">
+            Read-only visibility across all litigation cases and agreements; full control over quotation documents and financial records.
           </p>
           <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-400 space-y-1">
             <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-medium">
               <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-              <span>Quotation upload, edit, delete &amp; in-dashboard view</span>
+              <span>Quotation upload, edit, delete &amp; view</span>
             </div>
             <div className="flex items-center gap-1.5 text-slate-400">
               <Info className="w-3.5 h-3.5 shrink-0" />
-              <span>Read-only access to case particulars &amp; hearings</span>
+              <span>Read-only access to case particulars</span>
             </div>
           </div>
         </div>
@@ -245,20 +271,48 @@ export const SettingsView: React.FC = () => {
               <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Litigation Associate</h3>
             </div>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
-              {associateCount} Active
+              {litigationCount} Active
             </span>
           </div>
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Hands-on litigation operations: log and edit hearings, court orders, statutory deadlines, parties, internal notes, and document vault uploads.
+          <p className="text-xs text-slate-500 leading-relaxed min-h-[48px]">
+            Hands-on litigation operations: log and edit hearings, court orders, statutory deadlines, parties, internal notes, and pleadings.
           </p>
           <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-400 space-y-1">
             <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
               <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-              <span>All case entries, hearing logs &amp; document uploads</span>
+              <span>Case data entry, hearings &amp; doc uploads</span>
             </div>
             <div className="flex items-center gap-1.5 text-slate-400">
               <Info className="w-3.5 h-3.5 shrink-0" />
-              <span>Quotations and admin settings strictly hidden</span>
+              <span>Quotations and settings strictly hidden</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 4: Agreements Associate */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3 shadow-xs">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                <FileText className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Agreements Associate</h3>
+            </div>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
+              {agreementsCount} Active
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 leading-relaxed min-h-[48px]">
+            Hands-on commercial contract operations: contract intake, drafting, internal and counterparty reviews, versioning, and execution.
+          </p>
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-400 space-y-1">
+            <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-medium">
+              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+              <span>Agreement drafting &amp; version uploads</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-slate-400">
+              <Info className="w-3.5 h-3.5 shrink-0" />
+              <span>Quotations and settings strictly hidden</span>
             </div>
           </div>
         </div>
@@ -272,7 +326,7 @@ export const SettingsView: React.FC = () => {
               Active Firm Team Members ({profiles.length})
             </h2>
             <p className="text-xs text-slate-500">
-              Team members configured with access to the Lextria Litigator platform
+              Team members configured with access to the Lextria platform
             </p>
           </div>
         </div>
@@ -292,10 +346,14 @@ export const SettingsView: React.FC = () => {
               const isCurrent = p.id === currentUser?.id;
               const isSuper = p.role === 'SUPER_ADMIN';
               const isFin = p.role === 'FINANCE';
-              const isAssoc = p.role === 'ASSOCIATE';
+              const isAgr = p.department === 'AGREEMENT';
+              const roleDisplay = formatProfileRole(p);
 
               return (
-                <div key={p.id} className="py-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div
+                  key={p.id}
+                  className="py-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                >
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold text-sm flex items-center justify-center shrink-0 border border-indigo-100 dark:border-indigo-900/60">
                       {p.display_name.charAt(0).toUpperCase()}
@@ -320,11 +378,21 @@ export const SettingsView: React.FC = () => {
                           ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800'
                           : isFin
                           ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800'
+                          : isAgr
+                          ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800'
                           : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
                       }`}
                     >
-                      {isSuper ? <Shield className="w-3 h-3" /> : isFin ? <Coins className="w-3 h-3" /> : <Scale className="w-3 h-3" />}
-                      <span>{p.role.replace(/_/g, ' ')}</span>
+                      {isSuper ? (
+                        <Shield className="w-3 h-3" />
+                      ) : isFin ? (
+                        <Coins className="w-3 h-3" />
+                      ) : isAgr ? (
+                        <FileText className="w-3 h-3" />
+                      ) : (
+                        <Scale className="w-3 h-3" />
+                      )}
+                      <span>{roleDisplay}</span>
                     </span>
 
                     <span className="text-[11px] text-slate-500 font-mono hidden md:inline">
@@ -371,7 +439,7 @@ export const SettingsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setAddModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs p-1"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs p-1 cursor-pointer"
               >
                 Cancel
               </button>
@@ -442,24 +510,25 @@ export const SettingsView: React.FC = () => {
                   Access Role <span className="text-rose-500">*</span>
                 </label>
                 <select
-                  value={newRole}
-                  onChange={(e) => {
-                    const r = e.target.value as any;
-                    setNewRole(r);
-                    if (r === 'FINANCE') setNewDept('FINANCE');
-                    else if (r === 'SUPER_ADMIN') setNewDept('MANAGEMENT');
-                    else setNewDept('LITIGATION');
-                  }}
+                  value={roleScope}
+                  onChange={(e) => setRoleScope(e.target.value as any)}
                   className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 font-semibold"
                 >
-                  <option value="ASSOCIATE">Litigation Associate (Full litigation data &amp; doc operations)</option>
-                  <option value="FINANCE">Finance Head (Read-only cases, full quotation control)</option>
+                  <option value="LITIGATION_ASSOCIATE">
+                    Litigation Associate (Full litigation data &amp; doc operations)
+                  </option>
+                  <option value="AGREEMENT_ASSOCIATE">
+                    Agreements Associate (Commercial contracts drafting &amp; review)
+                  </option>
+                  <option value="FINANCE">
+                    Finance Head (Read-only cases, full quotation control)
+                  </option>
                   <option value="SUPER_ADMIN" disabled={superAdminCount >= 2}>
                     Super Admin {superAdminCount >= 2 ? '(Limit reached: Max 2 allowed)' : '(Full management &amp; settings)'}
                   </option>
                 </select>
 
-                {newRole === 'SUPER_ADMIN' && superAdminCount >= 2 && (
+                {roleScope === 'SUPER_ADMIN' && superAdminCount >= 2 && (
                   <div className="mt-1 text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1">
                     <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                     <span>Maximum 2 Super Admins allowed. Please choose another role.</span>
@@ -467,35 +536,17 @@ export const SettingsView: React.FC = () => {
                 )}
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Department
-                </label>
-                <div className="relative">
-                  <Building className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
-                  <select
-                    value={newDept}
-                    onChange={(e) => setNewDept(e.target.value as any)}
-                    className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="LITIGATION">LITIGATION</option>
-                    <option value="FINANCE">FINANCE</option>
-                    <option value="MANAGEMENT">MANAGEMENT</option>
-                  </select>
-                </div>
-              </div>
-
               <div className="pt-3 flex justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setAddModalOpen(false)}
-                  className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+                  className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting || (newRole === 'SUPER_ADMIN' && superAdminCount >= 2)}
+                  disabled={submitting || (roleScope === 'SUPER_ADMIN' && superAdminCount >= 2)}
                   className="px-4 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition disabled:opacity-50 cursor-pointer shadow-xs flex items-center gap-1.5"
                 >
                   {submitting ? 'Creating User...' : 'Create Team User'}

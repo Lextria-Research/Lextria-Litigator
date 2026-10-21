@@ -39,7 +39,7 @@ export const AUTH_MODE: 'password' | 'otp' =
 export const INITIAL_SUPER_ADMIN: UserProfile = {
   id: '5b488b59-915c-4f02-b973-748cf9a46902',
   email: 'pranavbhat@lextria.in',
-  display_name: 'Pranav Bhat (Super Admin)',
+  display_name: 'Pranav Bhat',
   role: 'SUPER_ADMIN',
   department: 'MANAGEMENT',
   is_finance_lead: false,
@@ -164,5 +164,17 @@ export function canManageTeam(user: UserProfile | null): boolean {
 
 export function canDeleteCases(user: UserProfile | null): boolean {
   return isSuperAdmin(user);
+}
+
+export function formatProfileRole(p: { role?: string; department?: string; display_name?: string }): string {
+  if (!p) return '';
+  const role = p.role || '';
+  if (role === 'SUPER_ADMIN') return 'Super Admin';
+  if (role === 'FINANCE') return 'Finance Head';
+  if (role === 'ASSOCIATE') {
+    return p.department === 'AGREEMENT' ? 'Agreements Associate' : 'Litigation Associate';
+  }
+  if (role === 'DEPT_ADMIN') return 'Department Admin';
+  return role.replace(/_/g, ' ');
 }
 

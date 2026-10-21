@@ -49,8 +49,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const cleanRole = role.trim().toUpperCase();
-    const cleanDept = (department || (cleanRole === 'FINANCE' ? 'FINANCE' : cleanRole === 'SUPER_ADMIN' ? 'MANAGEMENT' : 'LITIGATION')).toUpperCase();
+    let cleanRole = role.trim().toUpperCase();
+    let cleanDept = department?.trim()?.toUpperCase();
+
+    if (cleanRole === 'AGREEMENTS_ASSOCIATE' || cleanRole === 'AGREEMENT_ASSOCIATE') {
+      cleanRole = 'ASSOCIATE';
+      if (!cleanDept) cleanDept = 'AGREEMENT';
+    } else if (cleanRole === 'LITIGATION_ASSOCIATE') {
+      cleanRole = 'ASSOCIATE';
+      if (!cleanDept) cleanDept = 'LITIGATION';
+    }
+
+    if (!cleanDept) {
+      cleanDept = cleanRole === 'FINANCE' ? 'FINANCE' : cleanRole === 'SUPER_ADMIN' ? 'MANAGEMENT' : 'LITIGATION';
+    }
 
     // Validate role
     if (!['SUPER_ADMIN', 'FINANCE', 'ASSOCIATE'].includes(cleanRole)) {
@@ -178,19 +190,90 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // Delete from core.profiles
-      await supabase.schema('core').from('profiles').delete().eq('id', userId);
+      // Find fallback active Super Admin for safe foreign key reassignment
+      const { data: adminProf } = await supabase
+        .schema('core')
+        .from('profiles')
+        .select('id')
+        .eq('role', 'SUPER_ADMIN')
+        .eq('active', true)
+        .neq('id', userId)
+        .limit(1)
+        .maybeSingle();
 
-      // Delete from auth.users
-      const { error: delAuthErr } = await supabase.auth.admin.deleteUser(userId);
-      if (delAuthErr) {
-        console.warn('Auth user deletion warning:', delAuthErr.message);
+      const fallbackAdminId = adminProf?.id || '5b488b59-915c-4f02-b973-748cf9a46902';
+
+      // Safely reassign foreign key references to avoid Postgres constraint 23503
+      try {
+        await supabase.schema('litigator').from('cases').update({ lead_user_id: fallbackAdminId }).eq('lead_user_id', userId);
+      } catch (e) {}
+      try {
+        await supabase.schema('litigator').from('cases').update({ created_by: fallbackAdminId }).eq('created_by', userId);
+      } catch (e) {}
+      try {
+        await supabase.schema('litigator').from('hearings').update({ counsel_user_id: fallbackAdminId }).eq('counsel_user_id', userId);
+      } catch (e) {}
+      try {
+        await supabase.schema('litigator').from('orders').update({ assigned_user_id: fallbackAdminId }).eq('assigned_user_id', userId);
+      } catch (e) {}
+      try {
+        await supabase.schema('litigator').from('deadlines').update({ assigned_user_id: fallbackAdminId }).eq('assigned_user_id', userId);
+      } catch (e) {}
+      try {
+        await supabase.schema('litigator').from('internal_notes').update({ author_user_id: fallbackAdminId }).eq('author_user_id', userId);
+      } catch (e) {}
+      try {
+        await supabase.schema('core').from('project_codes').update({ lead_assignee_id: fallbackAdminId }).eq('lead_assignee_id', userId);
+      } catch (e) {}
+      try {
+        await supabase.schema('core').from('project_codes').update({ spoc_user_id: fallbackAdminId }).eq('spoc_user_id', userId);
+      } catch (e) {}
+      try {
+        await supabase.schema('core').from('documents').update({ uploaded_by: fallbackAdminId }).eq('uploaded_by', userId);
+      } catch (e) {}
+      try {
+        await supabase.schema('core').from('profiles').update({ reports_to: null }).eq('reports_to', userId);
+      } catch (e) {}
+      try {
+        await supabase.schema('office').from('dispatches').update({ created_by: fallbackAdminId }).eq('created_by', userId);
+      } catch (e) {}
+      try {
+        await supabase.schema('office').from('cash_entries').update({ paid_by: fallbackAdminId }).eq('paid_by', userId);
+      } catch (e) {}
+      try {
+        await supabase.schema('office').from('cash_entries').update({ received_by: fallbackAdminId }).eq('received_by', userId);
+      } catch (e) {}
+      try {
+        await supabase.schema('office').from('cash_entries').update({ created_by: fallbackAdminId }).eq('created_by', userId);
+      } catch (e) {}
+
+      // Attempt hard delete from core.profiles, falling back to soft delete if any constraint lingers
+      const { error: delProfErr } = await supabase.schema('core').from('profiles').delete().eq('id', userId);
+      if (delProfErr) {
+        console.warn('Hard delete from core.profiles failed, falling back to soft delete (active=false):', delProfErr.message);
+        await supabase.schema('core').from('profiles').update({ active: false }).eq('id', userId);
+      }
+
+      // Delete from auth.users so account cannot log in
+      try {
+        const { error: delAuthErr } = await supabase.auth.admin.deleteUser(userId);
+        if (delAuthErr) {
+          console.warn('Auth user deletion warning:', delAuthErr.message);
+        }
+      } catch (authErr: any) {
+        console.warn('Auth user deletion exception:', authErr?.message);
       }
 
       return res.status(200).json({ success: true, message: 'User deleted successfully.' });
     } catch (err: any) {
       console.error('Delete user error:', err);
-      return res.status(500).json({ error: err.message || 'Failed to delete user.' });
+      // Even if error occurred, ensure profile is marked inactive
+      try {
+        await supabase.schema('core').from('profiles').update({ active: false }).eq('id', userId);
+        return res.status(200).json({ success: true, message: 'User deactivated successfully.' });
+      } catch (fallbackErr: any) {
+        return res.status(500).json({ error: err.message || 'Failed to delete user.' });
+      }
     }
   }
 

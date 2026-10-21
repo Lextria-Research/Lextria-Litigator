@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Check, AlertCircle, Scale, Calendar, Coins } from 'lucide-react';
 import { updateCase, fetchProfiles, saveCaseQuotation } from '../../lib/api';
 import { uploadLitigatorFile } from '../../lib/files';
-import { getStoredUser, isSuperAdminOrFinance } from '../../lib/auth';
+import { getStoredUser, isSuperAdminOrFinance, formatProfileRole } from '../../lib/auth';
 import { CASE_STAGES, CaseRecord, CaseType, ClientRole, CoreProfile } from '../../lib/types';
 
 interface EditCaseModalProps {
@@ -371,7 +371,7 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
                   <option value="">Select counsel...</option>
                   {profiles.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.display_name} ({p.role})
+                      {p.display_name} ({formatProfileRole(p)})
                     </option>
                   ))}
                 </select>

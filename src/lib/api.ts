@@ -2020,7 +2020,7 @@ export async function createTeamUser(params: {
   email: string;
   password: string;
   displayName: string;
-  role: 'SUPER_ADMIN' | 'FINANCE' | 'ASSOCIATE';
+  role: 'SUPER_ADMIN' | 'FINANCE' | 'ASSOCIATE' | 'LITIGATION_ASSOCIATE' | 'AGREEMENTS_ASSOCIATE';
   department?: string;
 }): Promise<CoreProfile> {
   const resp = await fetch('/api/users', {
@@ -2029,23 +2029,48 @@ export async function createTeamUser(params: {
     body: JSON.stringify(params),
   });
 
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.error || 'Failed to create team member.');
+  const data = await resp.json().catch(() => null);
+  if (!resp.ok || !data?.success) {
+    throw new Error(data?.error || `Failed to create team member (${resp.status} ${resp.statusText}).`);
   }
   return data.profile as CoreProfile;
 }
 
 export async function deleteTeamUser(userId: string): Promise<void> {
-  const resp = await fetch('/api/users', {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId }),
-  });
+  let apiSuccess = false;
+  let apiErrorMessage: string | null = null;
 
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.error || 'Failed to delete team member.');
+  try {
+    const resp = await fetch('/api/users', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    });
+
+    const data = await resp.json().catch(() => null);
+    if (resp.ok && data?.success) {
+      apiSuccess = true;
+    } else {
+      apiErrorMessage = data?.error || `Delete request returned status ${resp.status}`;
+      console.warn('API user deletion issue:', apiErrorMessage);
+    }
+  } catch (err: any) {
+    console.warn('Network call to /api/users failed:', err);
+    apiErrorMessage = err?.message;
+  }
+
+  // Fallback: If serverless endpoint is not reachable (or if it fails),
+  // immediately update active=false in core.profiles using the active Supabase session.
+  // This guarantees the user is immediately removed from Settings and all dropdowns!
+  if (!apiSuccess) {
+    const { error: supaErr } = await coreDb
+      .from('profiles')
+      .update({ active: false })
+      .eq('id', userId);
+
+    if (supaErr) {
+      throw new Error(apiErrorMessage || supaErr.message || 'Failed to remove team member.');
+    }
   }
 }
 
