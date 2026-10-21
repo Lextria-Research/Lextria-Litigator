@@ -1,6 +1,5 @@
-// src/features/agreements/NewAgreementModal.tsx
-import React, { useState, useEffect } from 'react';
-import { X, Plus, Check, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { X, Plus, Check, AlertCircle, CheckCircle2 } from 'lucide-react';
 import {
   fetchClients,
   createAgreement,
@@ -32,6 +31,21 @@ export const NewAgreementModal: React.FC<NewAgreementModalProps> = ({
   const [creatingClient, setCreatingClient] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [newClientCode, setNewClientCode] = useState('');
+
+  // Universal client duplicate matcher
+  const matchedClient = useMemo(() => {
+    if (!creatingClient) return null;
+    const nameNorm = newClientName.trim().toLowerCase();
+    const codeNorm = newClientCode.trim().toUpperCase();
+    if (!nameNorm && !codeNorm) return null;
+    return (
+      clients.find(
+        (c) =>
+          (nameNorm && c.client_name.trim().toLowerCase() === nameNorm) ||
+          (codeNorm && c.client_code.trim().toUpperCase() === codeNorm)
+      ) || null
+    );
+  }, [creatingClient, newClientName, newClientCode, clients]);
 
   const [projectCode, setProjectCode] = useState('');
   const [title, setTitle] = useState('');
@@ -83,19 +97,23 @@ export const NewAgreementModal: React.FC<NewAgreementModalProps> = ({
     setError(null);
 
     try {
-      if (creatingClient) {
+      if (creatingClient && !matchedClient) {
         if (!newClientName.trim() || !newClientCode.trim()) {
           throw new Error('Please enter Client Name and unique Client Code.');
         }
       }
 
+      const effectiveClientId = creatingClient
+        ? (matchedClient ? matchedClient.id : undefined)
+        : clientId;
+
       const createdAgr = await createAgreement({
         projectCode: projectCode.trim().toUpperCase(),
         agreementType,
         title: title.trim(),
-        clientId: creatingClient ? undefined : clientId,
-        newClientName: creatingClient ? newClientName.trim() : undefined,
-        newClientCode: creatingClient ? newClientCode.trim().toUpperCase() : undefined,
+        clientId: effectiveClientId,
+        newClientName: creatingClient && !matchedClient ? newClientName.trim() : undefined,
+        newClientCode: creatingClient && !matchedClient ? newClientCode.trim().toUpperCase() : undefined,
         clientSide: clientSide || undefined,
         leadUserId: leadUserId || undefined,
         reviewerUserId: reviewerUserId || undefined,
@@ -174,33 +192,56 @@ export const NewAgreementModal: React.FC<NewAgreementModalProps> = ({
             </div>
 
             {creatingClient ? (
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                    Client Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newClientName}
-                    onChange={(e) => setNewClientName(e.target.value)}
-                    placeholder="e.g. Apex BioPharma Ltd"
-                    className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
-                  />
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                      Client Name
+                    </label>
+                    <input
+                      type="text"
+                      required={!matchedClient}
+                      value={newClientName}
+                      onChange={(e) => setNewClientName(e.target.value)}
+                      placeholder="e.g. Robust Materials Technology Private Limited"
+                      className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                      Client Code (Unique)
+                    </label>
+                    <input
+                      type="text"
+                      required={!matchedClient}
+                      value={newClientCode}
+                      onChange={(e) => setNewClientCode(e.target.value.toUpperCase())}
+                      placeholder="e.g. RMTPL"
+                      className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 font-mono"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                    Client Code
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newClientCode}
-                    onChange={(e) => setNewClientCode(e.target.value.toUpperCase())}
-                    placeholder="e.g. CLI-1092"
-                    className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 font-mono"
-                  />
-                </div>
+
+                {matchedClient && (
+                  <div className="p-2.5 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-lg text-xs text-blue-700 dark:text-blue-300 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+                      <span>
+                        Universal client found: <strong>{matchedClient.client_name} ({matchedClient.client_code})</strong>. This client will be linked directly to prevent duplicates.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreatingClient(false);
+                        setClientId(matchedClient.id);
+                      }}
+                      className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline shrink-0 ml-2"
+                    >
+                      Select In Dropdown
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div>

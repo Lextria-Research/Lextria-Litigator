@@ -51,22 +51,67 @@ export async function fetchClients(): Promise<CoreClient[]> {
 }
 
 export async function createClient(client: Partial<CoreClient>): Promise<CoreClient> {
+  const cleanName = client.client_name?.trim() || '';
+  const cleanCode = client.client_code?.trim()?.toUpperCase() || '';
+
+  if (!cleanName) {
+    throw new Error('Client name is required.');
+  }
+
+  // 1. Check if a client with the same name (case-insensitive) already exists in core.clients
+  const { data: existingByName, error: checkNameErr } = await coreDb
+    .from('clients')
+    .select('*')
+    .ilike('client_name', cleanName)
+    .limit(1)
+    .maybeSingle();
+
+  if (checkNameErr) console.warn('Check client by name warning:', checkNameErr.message);
+  if (existingByName) {
+    throw new Error(
+      `A client named "${existingByName.client_name}" (${existingByName.client_code}) already exists in the universal client registry. Duplicate clients are not permitted.`
+    );
+  }
+
+  // 2. Check if a client with the same client_code already exists
+  if (cleanCode) {
+    const { data: existingByCode, error: checkCodeErr } = await coreDb
+      .from('clients')
+      .select('*')
+      .eq('client_code', cleanCode)
+      .limit(1)
+      .maybeSingle();
+
+    if (checkCodeErr) console.warn('Check client by code warning:', checkCodeErr.message);
+    if (existingByCode) {
+      throw new Error(
+        `Client code "${cleanCode}" is already registered to "${existingByCode.client_name}". Duplicate client codes are not permitted.`
+      );
+    }
+  }
+
   const { data, error } = await coreDb
     .from('clients')
     .insert({
-      client_code: client.client_code?.toUpperCase(),
-      client_name: client.client_name,
+      client_code: cleanCode || undefined,
+      client_name: cleanName,
       entity_type: client.entity_type || 'OTHER',
-      email: client.email || null,
-      phone: client.phone || null,
-      gstin: client.gstin || null,
-      pan: client.pan || null,
-      billing_address: client.billing_address || null,
+      email: client.email?.trim() || null,
+      phone: client.phone?.trim() || null,
+      gstin: client.gstin?.trim() || null,
+      pan: client.pan?.trim() || null,
+      billing_address: client.billing_address?.trim() || null,
       state_code: client.state_code || null,
     })
     .select()
     .single();
-  if (error) throw error;
+
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error('A client with this name or code already exists in the universal client registry.');
+    }
+    throw error;
+  }
   return data as CoreClient;
 }
 
@@ -651,15 +696,55 @@ export interface CreateCaseParams {
 }
 
 export async function createCase(params: CreateCaseParams): Promise<{ id: string }> {
+  let resolvedClientId = params.clientId || null;
+  let resolvedNewClientName = params.newClientName || null;
+  let resolvedNewClientCode = params.newClientCode || null;
+
+  // Universal client duplicate prevention across connected dashboards:
+  if (resolvedNewClientName) {
+    const cleanName = resolvedNewClientName.trim();
+    const cleanCode = (resolvedNewClientCode || '').trim().toUpperCase();
+
+    try {
+      let existingClient = null;
+      const { data: byName } = await coreDb
+        .from('clients')
+        .select('id, client_name, client_code')
+        .ilike('client_name', cleanName)
+        .limit(1)
+        .maybeSingle();
+
+      if (byName) {
+        existingClient = byName;
+      } else if (cleanCode) {
+        const { data: byCode } = await coreDb
+          .from('clients')
+          .select('id, client_name, client_code')
+          .eq('client_code', cleanCode)
+          .limit(1)
+          .maybeSingle();
+        if (byCode) existingClient = byCode;
+      }
+
+      if (existingClient) {
+        resolvedClientId = existingClient.id;
+        resolvedNewClientName = null;
+        resolvedNewClientCode = null;
+      }
+    } catch (e) {
+      console.warn('Existing client check error:', e);
+    }
+  }
+
   const { data, error } = await supabase.schema('litigator').rpc('create_case', {
     p_project_code: params.projectCode,
     p_case_type: params.caseType,
     p_court: params.court,
     p_cause_title: params.causeTitle,
     p_client_role: params.clientRole,
-    p_client_id: params.clientId || null,
-    p_new_client_name: params.newClientName || null,
-    p_new_client_code: params.newClientCode || null,
+    p_client_id: resolvedClientId,
+    p_new_client_name: resolvedNewClientName,
+    p_new_client_code: resolvedNewClientCode,
     p_bench: params.bench || null,
     p_case_number: params.caseNumber || null,
     p_cnr_number: params.cnrNumber || null,
@@ -1361,13 +1446,52 @@ export interface CreateAgreementParams {
 }
 
 export async function createAgreement(params: CreateAgreementParams): Promise<{ id: string }> {
+  let resolvedClientId = params.clientId || null;
+  let resolvedNewClientName = params.newClientName || null;
+  let resolvedNewClientCode = params.newClientCode || null;
+
+  // If a new client name is provided, check if client already exists universally
+  if (params.newClientName?.trim()) {
+    const cleanName = params.newClientName.trim();
+    const cleanCode = params.newClientCode?.trim()?.toUpperCase();
+    try {
+      let existingClient = null;
+      const { data: byName } = await coreDb
+        .from('clients')
+        .select('id, client_name, client_code')
+        .ilike('client_name', cleanName)
+        .limit(1)
+        .maybeSingle();
+
+      if (byName) {
+        existingClient = byName;
+      } else if (cleanCode) {
+        const { data: byCode } = await coreDb
+          .from('clients')
+          .select('id, client_name, client_code')
+          .eq('client_code', cleanCode)
+          .limit(1)
+          .maybeSingle();
+        if (byCode) existingClient = byCode;
+      }
+
+      if (existingClient) {
+        resolvedClientId = existingClient.id;
+        resolvedNewClientName = null;
+        resolvedNewClientCode = null;
+      }
+    } catch (e) {
+      console.warn('Existing client check error in createAgreement:', e);
+    }
+  }
+
   const { data, error } = await supabase.schema('litigator').rpc('create_agreement', {
     p_project_code: params.projectCode,
     p_agreement_type: params.agreementType,
     p_title: params.title,
-    p_client_id: params.clientId || null,
-    p_new_client_name: params.newClientName || null,
-    p_new_client_code: params.newClientCode || null,
+    p_client_id: resolvedClientId,
+    p_new_client_name: resolvedNewClientName,
+    p_new_client_code: resolvedNewClientCode,
     p_client_side: params.clientSide || 'FIRST_PARTY',
     p_stage: params.stage || 'INTAKE',
     p_lead_user_id: params.leadUserId || null,

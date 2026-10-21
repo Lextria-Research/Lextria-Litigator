@@ -199,7 +199,7 @@ export const CasesListView: React.FC = () => {
               <option value="">All Clients</option>
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.client_name}
+                  {c.client_code} — {c.client_name}
                 </option>
               ))}
             </select>
