@@ -138,13 +138,8 @@ export const AppLayout: React.FC = () => {
               LX
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-900 dark:text-slate-100 text-sm sm:text-base tracking-tight">
-                  Lextria Litigator
-                </span>
-                <span className="bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold px-2 py-0.5 rounded-full tracking-wider border border-indigo-200 dark:border-indigo-800">
-                  TEST
-                </span>
+              <div className="font-bold text-slate-900 dark:text-slate-100 text-sm sm:text-base tracking-tight">
+                Lextria Litigator
               </div>
               <p className="text-[10px] text-slate-400 hidden sm:block">Court Cases &amp; Agreements Vault</p>
             </div>
