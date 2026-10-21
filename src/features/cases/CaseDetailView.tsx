@@ -676,22 +676,6 @@ export const CaseDetailView: React.FC = () => {
                 <span>Edit Case Details</span>
               </button>
             )}
-
-            {/* Update Hearing Action */}
-            {canEdit && (
-              <button
-                type="button"
-                onClick={() => {
-                  const upcoming = hearings.find((h) => h.hearing_date === theCase.next_hearing_date);
-                  setTargetHearing(upcoming || null);
-                  setUpdateHearingOpen(true);
-                }}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm shadow-indigo-600/30 transition"
-              >
-                <Calendar className="w-3.5 h-3.5" />
-                <span>Update Hearing</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -739,14 +723,16 @@ export const CaseDetailView: React.FC = () => {
                   <Coins className="w-3 h-3 text-amber-600" />
                   <span>Quotation Document &amp; Fee</span>
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setQuoteModalOpen(true)}
-                  className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline capitalize font-semibold flex items-center gap-0.5"
-                >
-                  <Edit2 className="w-2.5 h-2.5" />
-                  <span>{quotationDoc || theCase.quotation || theCase.quotation_amount ? 'Manage' : '+ Upload'}</span>
-                </button>
+                {(quotationDoc || theCase.quotation || theCase.quotation_amount) ? (
+                  <button
+                    type="button"
+                    onClick={() => setQuoteModalOpen(true)}
+                    className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline capitalize font-semibold flex items-center gap-0.5"
+                  >
+                    <Edit2 className="w-2.5 h-2.5" />
+                    <span>Manage</span>
+                  </button>
+                ) : null}
               </div>
 
               {quotationDoc ? (
