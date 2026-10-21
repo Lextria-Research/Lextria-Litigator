@@ -35,6 +35,7 @@ import type { CoreNotification } from '../../lib/types';
 export const AppLayout: React.FC = () => {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(getStoredUser());
+  const [authChecking, setAuthChecking] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -51,9 +52,13 @@ export const AppLayout: React.FC = () => {
   // Verify Supabase auth session on mount & subscribe to auth changes
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
+      const stored = getStoredUser();
+      if (!session || !stored) {
         signOutUser();
         navigate('/login', { replace: true });
+      } else {
+        setCurrentUser(stored);
+        setAuthChecking(false);
       }
     });
 
@@ -61,6 +66,12 @@ export const AppLayout: React.FC = () => {
       if (!session) {
         signOutUser();
         navigate('/login', { replace: true });
+      } else {
+        const stored = getStoredUser();
+        if (stored) {
+          setCurrentUser(stored);
+          setAuthChecking(false);
+        }
       }
     });
 
@@ -113,6 +124,17 @@ export const AppLayout: React.FC = () => {
     { label: 'Settings & Team', path: '/settings', icon: Users },
     { label: 'Admin › Integrations', path: '/admin/integrations', icon: Settings },
   ];
+
+  if (authChecking || !currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center gap-3">
+        <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-extrabold text-sm shadow-md shadow-indigo-600/20">
+          LX
+        </div>
+        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className={`min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 ${isDarkMode ? 'dark' : ''}`}>

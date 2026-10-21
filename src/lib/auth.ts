@@ -52,12 +52,12 @@ export const INITIAL_CREDENTIALS: Record<string, string> = {
   'pranavbhat@lextria.in': 'LextriaLT@334',
 };
 
-const LOCAL_STORAGE_USER_KEY = 'lextria_litigator_active_profile';
-const LOCAL_STORAGE_VIEW_AS_KEY = 'lextria_litigator_view_as_role';
+const STORAGE_USER_KEY = 'lextria_litigator_active_profile';
+const STORAGE_VIEW_AS_KEY = 'lextria_litigator_view_as_role';
 
 export function getStoredUser(): UserProfile | null {
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
+    const raw = sessionStorage.getItem(STORAGE_USER_KEY);
     if (raw) return JSON.parse(raw);
   } catch {
     // fallback
@@ -67,26 +67,39 @@ export function getStoredUser(): UserProfile | null {
 
 export function setStoredUser(user: UserProfile | null) {
   if (user) {
-    localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(user));
+    sessionStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user));
   } else {
-    localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
-    localStorage.removeItem(LOCAL_STORAGE_VIEW_AS_KEY);
+    sessionStorage.removeItem(STORAGE_USER_KEY);
+    sessionStorage.removeItem(STORAGE_VIEW_AS_KEY);
   }
+  // Clear any legacy localStorage user keys
+  try {
+    localStorage.removeItem('lextria_litigator_active_profile');
+    localStorage.removeItem('lextria_litigator_view_as_role');
+  } catch {}
 }
 
 export function signOutUser() {
   setStoredUser(null);
+  try {
+    sessionStorage.clear();
+    Object.keys(localStorage).forEach((k) => {
+      if (k.startsWith('sb-') && k.endsWith('-auth-token')) {
+        localStorage.removeItem(k);
+      }
+    });
+  } catch {}
 }
 
 export function getViewAsRole(): Role | null {
-  return (localStorage.getItem(LOCAL_STORAGE_VIEW_AS_KEY) as Role) || null;
+  return (sessionStorage.getItem(STORAGE_VIEW_AS_KEY) as Role) || null;
 }
 
 export function setViewAsRole(role: Role | null) {
   if (role) {
-    localStorage.setItem(LOCAL_STORAGE_VIEW_AS_KEY, role);
+    sessionStorage.setItem(STORAGE_VIEW_AS_KEY, role);
   } else {
-    localStorage.removeItem(LOCAL_STORAGE_VIEW_AS_KEY);
+    sessionStorage.removeItem(STORAGE_VIEW_AS_KEY);
   }
 }
 

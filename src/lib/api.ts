@@ -41,7 +41,69 @@ export async function fetchProfiles(): Promise<CoreProfile[]> {
   return (data || []) as CoreProfile[];
 }
 
+export async function syncClientToIpLedger(name: string) {
+  try {
+    const { data: stRow } = await supabase
+      .from('lextria_state')
+      .select('state')
+      .eq('id', 'lextria-state')
+      .maybeSingle();
+
+    if (stRow?.state) {
+      const st = stRow.state;
+      st.clients = st.clients || [];
+      const clean = name.trim();
+      const exists = st.clients.some((c: any) => c.name?.trim()?.toLowerCase() === clean.toLowerCase());
+      if (!exists) {
+        const nextSeq = st.nextClientSeq || (st.clients.length + 1);
+        st.clients.push({
+          id: 'c-' + nextSeq,
+          name: clean,
+          created: new Date().toISOString(),
+        });
+        st.nextClientSeq = nextSeq + 1;
+        await supabase.from('lextria_state').update({ state: st }).eq('id', 'lextria-state');
+      }
+    }
+  } catch (err) {
+    console.warn('Sync to IP Ledger state warning:', err);
+  }
+}
+
 export async function fetchClients(): Promise<CoreClient[]> {
+  try {
+    // Check if IP Ledger (public.lextria_state) has any client not yet in core.clients
+    const { data: stRow } = await supabase
+      .from('lextria_state')
+      .select('state')
+      .eq('id', 'lextria-state')
+      .maybeSingle();
+
+    if (stRow?.state?.clients?.length) {
+      const ipClients: Array<{ id: string; name: string; created?: string }> = stRow.state.clients;
+      const { data: existingCore } = await coreDb.from('clients').select('client_name');
+      const existingNames = new Set((existingCore || []).map((c: any) => c.client_name?.trim()?.toLowerCase()));
+
+      const missing = ipClients.filter((c) => c.name?.trim() && !existingNames.has(c.name.trim().toLowerCase()));
+      if (missing.length > 0) {
+        for (const m of missing) {
+          const cleanName = m.name.trim();
+          const codeCandidate = cleanName.replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase() || 'CLI';
+          try {
+            await coreDb.from('clients').insert({
+              client_name: cleanName,
+              client_code: codeCandidate,
+              entity_type: 'OTHER',
+              created_at: m.created || new Date().toISOString(),
+            });
+          } catch {}
+        }
+      }
+    }
+  } catch (err) {
+    // Graceful fallback to coreDb
+  }
+
   const { data, error } = await coreDb
     .from('clients')
     .select('*')
@@ -112,6 +174,10 @@ export async function createClient(client: Partial<CoreClient>): Promise<CoreCli
     }
     throw error;
   }
+
+  // 3. Synchronize immediately to IP Ledger (public.lextria_state)
+  await syncClientToIpLedger(cleanName);
+
   return data as CoreClient;
 }
 
@@ -760,6 +826,10 @@ export async function createCase(params: CreateCaseParams): Promise<{ id: string
 
   if (error) throw error;
   const caseId = data as string;
+
+  if (resolvedNewClientName) {
+    await syncClientToIpLedger(resolvedNewClientName);
+  }
 
   if (params.quotationAmount && isSuperAdminOrFinance(getStoredUser())) {
     try {
@@ -1511,7 +1581,13 @@ export async function createAgreement(params: CreateAgreementParams): Promise<{ 
   });
 
   if (error) throw error;
-  return { id: data as string };
+  const agreementId = data as string;
+
+  if (resolvedNewClientName) {
+    await syncClientToIpLedger(resolvedNewClientName);
+  }
+
+  return { id: agreementId };
 }
 
 export async function updateAgreementStage(
