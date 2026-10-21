@@ -7,6 +7,7 @@ import {
 } from '../../lib/api';
 import { getStoredUser, isSuperAdminOrFinance, formatProfileRole } from '../../lib/auth';
 import type { CoreClient, CoreProfile, CaseType, ClientRole } from '../../lib/types';
+import { ClientSearchSelect } from '../../components/common/ClientSearchSelect';
 
 interface NewCaseModalProps {
   isOpen: boolean;
@@ -252,18 +253,13 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
                 <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
                   Client (core.clients)
                 </label>
-                <select
+                <ClientSearchSelect
                   required
+                  clients={clients}
                   value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
-                >
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.client_code} — {c.client_name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(id) => setClientId(id)}
+                  placeholder="Search by name or code (200+ clients)..."
+                />
               </div>
             )}
 

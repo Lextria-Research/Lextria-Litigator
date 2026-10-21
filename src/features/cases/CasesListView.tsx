@@ -18,6 +18,7 @@ import { formatINRShort } from '../../lib/currency';
 import { getStoredUser, isSuperAdminOrFinance, canEditCaseData } from '../../lib/auth';
 import { CASE_STAGES, CaseRecord, CoreClient, CoreProfile } from '../../lib/types';
 import { NewCaseModal } from './NewCaseModal';
+import { ClientSearchSelect } from '../../components/common/ClientSearchSelect';
 
 export const CasesListView: React.FC = () => {
   const navigate = useNavigate();
@@ -191,18 +192,15 @@ export const CasesListView: React.FC = () => {
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
               Client
             </label>
-            <select
+            <ClientSearchSelect
+              clients={clients}
               value={selectedClient}
-              onChange={(e) => setSelectedClient(e.target.value)}
-              className="w-full px-2 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
-            >
-              <option value="">All Clients</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.client_code} — {c.client_name}
-                </option>
-              ))}
-            </select>
+              onChange={(id) => setSelectedClient(id)}
+              allowAllOption={true}
+              allOptionLabel="All Clients"
+              allowClear={true}
+              placeholder="All Clients"
+            />
           </div>
 
           {/* Lead Counsel */}

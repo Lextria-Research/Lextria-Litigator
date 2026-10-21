@@ -23,6 +23,7 @@ import {
   fetchProfiles,
 } from '../../lib/api';
 import { uploadLitigatorFile, getDocumentDownloadLink } from '../../lib/files';
+import { ClientSearchSelect } from '../../components/common/ClientSearchSelect';
 import {
   AGREEMENT_TYPES,
   TemplateRecord,
@@ -316,19 +317,13 @@ export const TemplatesView: React.FC = () => {
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-semibold mb-1">Client *</label>
-                <select
+                <ClientSearchSelect
                   required
+                  clients={clients}
                   value={startClientId}
-                  onChange={(e) => setStartClientId(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border rounded-lg"
-                >
-                  <option value="">Select Existing Client</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.client_code} &bull; {c.client_name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(id) => setStartClientId(id)}
+                  placeholder="Search client by name or code..."
+                />
               </div>
 
               <div>
