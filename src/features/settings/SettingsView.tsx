@@ -15,7 +15,14 @@ import {
   AlertTriangle,
   Info,
 } from 'lucide-react';
-import { fetchProfiles, createTeamUser, deleteTeamUser } from '../../lib/api';
+import {
+  fetchProfiles,
+  createTeamUser,
+  deleteTeamUser,
+  syncCustomStagesFromDb,
+  persistCustomStageToDb,
+  removeCustomStageFromDb,
+} from '../../lib/api';
 import { getStoredUser, canManageTeam, formatProfileRole } from '../../lib/auth';
 import type { CoreProfile } from '../../lib/types';
 import { CASE_STAGES, getCustomCaseStages, addCustomCaseStage, removeCustomCaseStage } from '../../lib/types';
@@ -55,6 +62,7 @@ export const SettingsView: React.FC = () => {
 
   useEffect(() => {
     loadProfiles();
+    syncCustomStagesFromDb().then(setCustomStages);
   }, []);
 
   const superAdminCount = useMemo(() => {
@@ -78,7 +86,7 @@ export const SettingsView: React.FC = () => {
   const [newStageInput, setNewStageInput] = useState('');
   const [stageError, setStageError] = useState<string | null>(null);
 
-  const handleAddStage = (e: React.FormEvent) => {
+  const handleAddStage = async (e: React.FormEvent) => {
     e.preventDefault();
     const stage = newStageInput.trim();
     if (!stage) return;
@@ -87,13 +95,15 @@ export const SettingsView: React.FC = () => {
       return;
     }
     addCustomCaseStage(stage);
+    await persistCustomStageToDb(stage);
     setCustomStages(getCustomCaseStages());
     setNewStageInput('');
     setStageError(null);
   };
 
-  const handleRemoveStage = (stage: string) => {
+  const handleRemoveStage = async (stage: string) => {
     removeCustomCaseStage(stage);
+    await removeCustomStageFromDb(stage);
     setCustomStages(getCustomCaseStages());
   };
 

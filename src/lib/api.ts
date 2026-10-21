@@ -26,6 +26,7 @@ import type {
   ClientNoteRecord,
   StageExpenseRecord,
 } from './types';
+import { getCustomCaseStages, saveCustomCaseStages } from './types';
 import { getStoredUser, isSuperAdminOrFinance } from './auth';
 
 // ==========================================
@@ -2474,6 +2475,49 @@ export async function getNextProjectCode(department: string = 'LITIGATION'): Pro
     return `${prefix}${maxNum + 1}`;
   } catch {
     return `${prefix}1`;
+  }
+}
+
+export async function syncCustomStagesFromDb(): Promise<string[]> {
+  try {
+    const { data } = await coreDb
+      .from('event_codes')
+      .select('description')
+      .eq('domain', 'CASE_STAGE');
+
+    if (data && data.length > 0) {
+      const dbStages = data.map((r: any) => r.description).filter(Boolean);
+      const localStages = getCustomCaseStages();
+      const merged = Array.from(new Set([...localStages, ...dbStages]));
+      saveCustomCaseStages(merged);
+      return merged;
+    }
+  } catch (err) {
+    console.warn('Could not sync custom stages from DB:', err);
+  }
+  return getCustomCaseStages();
+}
+
+export async function persistCustomStageToDb(stageName: string): Promise<void> {
+  const code = 'STAGE_' + stageName.trim().toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  try {
+    await coreDb.from('event_codes').upsert({
+      code,
+      domain: 'CASE_STAGE',
+      description: stageName.trim(),
+      default_client_label: stageName.trim(),
+    });
+  } catch (err) {
+    console.warn('Could not persist custom stage to database:', err);
+  }
+}
+
+export async function removeCustomStageFromDb(stageName: string): Promise<void> {
+  const code = 'STAGE_' + stageName.trim().toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  try {
+    await coreDb.from('event_codes').delete().eq('code', code).eq('domain', 'CASE_STAGE');
+  } catch (err) {
+    console.warn('Could not remove custom stage from database:', err);
   }
 }
 

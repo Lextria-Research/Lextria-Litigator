@@ -27,9 +27,11 @@ export const CASE_STAGES = [
   'Notice served',
   'Suit filed',
   'Summons',
+  'Pleadings',
   'Written statement',
   'Interim application',
   'Evidence',
+  'Hearing',
   'Final arguments',
   'Judgment',
   'Execution',
@@ -58,6 +60,7 @@ export function saveCustomCaseStages(stages: string[]): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(CUSTOM_STAGES_KEY, JSON.stringify(stages));
+    window.dispatchEvent(new CustomEvent('customStagesUpdated', { detail: stages }));
   } catch {
     // ignore
   }

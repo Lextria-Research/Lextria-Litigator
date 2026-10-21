@@ -62,6 +62,7 @@ import {
   fetchCaseExpenses,
   deleteStageExpense,
   fetchProjectCodes,
+  syncCustomStagesFromDb,
 } from '../../lib/api';
 import { clock } from '../../lib/clock';
 import { formatINR, formatINRShort } from '../../lib/currency';
@@ -214,6 +215,34 @@ export const CaseDetailView: React.FC = () => {
   const [expenses, setExpenses] = useState<StageExpenseRecord[]>([]);
   const [expenseModalOpen, setExpenseModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<StageExpenseRecord | null>(null);
+
+  // Dynamic Case Stages state (standard + custom stages from DB & localStorage)
+  const [stagesList, setStagesList] = useState<string[]>(() => getAllCaseStages());
+
+  useEffect(() => {
+    syncCustomStagesFromDb().then(() => {
+      setStagesList(getAllCaseStages());
+    });
+
+    const handleCustomStagesUpdate = () => {
+      setStagesList(getAllCaseStages());
+    };
+
+    window.addEventListener('customStagesUpdated', handleCustomStagesUpdate);
+    window.addEventListener('storage', handleCustomStagesUpdate);
+    return () => {
+      window.removeEventListener('customStagesUpdated', handleCustomStagesUpdate);
+      window.removeEventListener('storage', handleCustomStagesUpdate);
+    };
+  }, []);
+
+  const allAvailableStages = useMemo(() => {
+    const list = [...stagesList];
+    if (theCase?.current_stage && !list.includes(theCase.current_stage)) {
+      list.push(theCase.current_stage);
+    }
+    return list;
+  }, [stagesList, theCase?.current_stage]);
 
   // Document upload state
   const [uploadCategory, setUploadCategory] = useState<string>('Pleadings');
@@ -712,7 +741,7 @@ export const CaseDetailView: React.FC = () => {
                   onChange={(e) => handleStageChange(e.target.value)}
                   className="px-2.5 py-1 text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg focus:ring-2 focus:ring-indigo-500"
                 >
-                  {CASE_STAGES.map((s) => (
+                  {allAvailableStages.map((s) => (
                     <option key={s} value={s}>
                       {s}
                     </option>
