@@ -1,11 +1,12 @@
 // src/features/cases/UpdateHearingModal.tsx
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, Upload, Check, AlertCircle, Trash2 } from 'lucide-react';
+import { X, Calendar, Upload, Check, AlertCircle, Trash2, Receipt, IndianRupee } from 'lucide-react';
 import { updateAfterHearing, deleteHearing, fetchProfiles } from '../../lib/api';
 import { uploadLitigatorFile } from '../../lib/files';
 import { clock } from '../../lib/clock';
 import { formatProfileRole } from '../../lib/auth';
 import type { CoreProfile } from '../../lib/types';
+import { EXPENSE_CATEGORIES } from '../../lib/types';
 
 interface UpdateHearingModalProps {
   isOpen: boolean;
@@ -56,6 +57,13 @@ export const UpdateHearingModal: React.FC<UpdateHearingModalProps> = ({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Stage Expense Incurred State
+  const [hasExpense, setHasExpense] = useState(false);
+  const [expenseAmount, setExpenseAmount] = useState<number | ''>('');
+  const [expenseCategory, setExpenseCategory] = useState<string>('Documentation');
+  const [expenseBillable, setExpenseBillable] = useState(true);
+  const [expenseNotes, setExpenseNotes] = useState('');
+
   useEffect(() => {
     if (isOpen) {
       fetchProfiles().then(setProfiles).catch(console.error);
@@ -67,6 +75,11 @@ export const UpdateHearingModal: React.FC<UpdateHearingModalProps> = ({
       setAttendedBy(defaultAttendedBy || '');
       setOrderFile(null);
       setError(null);
+      setHasExpense(false);
+      setExpenseAmount('');
+      setExpenseCategory('Documentation');
+      setExpenseBillable(true);
+      setExpenseNotes('');
     }
   }, [
     isOpen,
@@ -110,6 +123,15 @@ export const UpdateHearingModal: React.FC<UpdateHearingModalProps> = ({
         nextPurpose: nextPurpose ? nextPurpose.trim() : null,
         attendedBy: attendedBy || null,
         orderDocumentId: orderDocId,
+        expense:
+          hasExpense && Number(expenseAmount) > 0
+            ? {
+                amount: Number(expenseAmount),
+                category: expenseCategory,
+                description: expenseNotes.trim() || undefined,
+                billable: expenseBillable,
+              }
+            : null,
       });
 
       onSuccess();
@@ -255,6 +277,98 @@ export const UpdateHearingModal: React.FC<UpdateHearingModalProps> = ({
                 />
               </div>
             </div>
+          </div>
+
+          {/* Stage Expense Incurred Option */}
+          <div className="p-3 bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-900/40 rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={hasExpense}
+                  onChange={(e) => setHasExpense(e.target.checked)}
+                  className="rounded border-amber-300 text-amber-600 focus:ring-amber-500 h-3.5 w-3.5 cursor-pointer"
+                />
+                <span className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                  <Receipt className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span>Record Incurred Expense at this Stage</span>
+                </span>
+              </label>
+              <span className="text-[10px] text-amber-700/80 dark:text-amber-400 font-medium bg-amber-100/60 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">
+                Syncs with Finance
+              </span>
+            </div>
+
+            {hasExpense && (
+              <div className="space-y-3 pt-1 border-t border-amber-200/50 dark:border-amber-900/40 animate-in fade-in duration-150">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Expense Amount (₹) <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <IndianRupee className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2 pointer-events-none" />
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        required={hasExpense}
+                        value={expenseAmount}
+                        onChange={(e) =>
+                          setExpenseAmount(e.target.value === '' ? '' : Number(e.target.value))
+                        }
+                        placeholder="e.g. 1500"
+                        className="w-full pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/60 rounded-lg text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-amber-500 font-mono font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Expense Category
+                    </label>
+                    <select
+                      value={expenseCategory}
+                      onChange={(e) => setExpenseCategory(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/60 rounded-lg text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-amber-500"
+                    >
+                      {EXPENSE_CATEGORIES.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Expense Description / Itemization
+                  </label>
+                  <input
+                    type="text"
+                    value={expenseNotes}
+                    onChange={(e) => setExpenseNotes(e.target.value)}
+                    placeholder="e.g. Notary attestation fee, conveyance / cab fare to court, courier charges"
+                    className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/60 rounded-lg text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={expenseBillable}
+                      onChange={(e) => setExpenseBillable(e.target.checked)}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer"
+                    />
+                    <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                      Billable to Client (Include in Client Invoicing / Quotation)
+                    </span>
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
 
           <div>

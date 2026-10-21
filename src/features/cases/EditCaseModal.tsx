@@ -4,7 +4,7 @@ import { X, Check, AlertCircle, Scale, Calendar, Coins } from 'lucide-react';
 import { updateCase, fetchProfiles, saveCaseQuotation } from '../../lib/api';
 import { uploadLitigatorFile } from '../../lib/files';
 import { getStoredUser, isSuperAdminOrFinance, formatProfileRole } from '../../lib/auth';
-import { CASE_STAGES, CaseRecord, CaseType, ClientRole, CoreProfile } from '../../lib/types';
+import { CASE_STAGES, CaseRecord, CaseType, ClientRole, CoreProfile, getAllCaseStages } from '../../lib/types';
 
 interface EditCaseModalProps {
   isOpen: boolean;
@@ -351,7 +351,7 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
                   onChange={(e) => setCurrentStage(e.target.value as any)}
                   className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500"
                 >
-                  {CASE_STAGES.map((s) => (
+                  {getAllCaseStages().map((s) => (
                     <option key={s} value={s}>
                       {s}
                     </option>

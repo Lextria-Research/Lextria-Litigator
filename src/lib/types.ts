@@ -34,11 +34,59 @@ export const CASE_STAGES = [
   'Judgment',
   'Execution',
   'Appeal',
+  'Disposed',
+  'Withdrawn',
   'Settled',
   'Closed',
 ] as const;
 
 export type CaseStage = typeof CASE_STAGES[number];
+
+const CUSTOM_STAGES_KEY = 'lextria_custom_case_stages';
+
+export function getCustomCaseStages(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(CUSTOM_STAGES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomCaseStages(stages: string[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(CUSTOM_STAGES_KEY, JSON.stringify(stages));
+  } catch {
+    // ignore
+  }
+}
+
+export function addCustomCaseStage(stage: string): string[] {
+  const trimmed = stage.trim();
+  if (!trimmed) return getAllCaseStages();
+  const existing = getCustomCaseStages();
+  if (!existing.includes(trimmed) && !(CASE_STAGES as readonly string[]).includes(trimmed)) {
+    const updated = [...existing, trimmed];
+    saveCustomCaseStages(updated);
+    return getAllCaseStages();
+  }
+  return getAllCaseStages();
+}
+
+export function removeCustomCaseStage(stage: string): string[] {
+  const existing = getCustomCaseStages();
+  const updated = existing.filter((s) => s.toLowerCase() !== stage.toLowerCase().trim());
+  saveCustomCaseStages(updated);
+  return getAllCaseStages();
+}
+
+export function getAllCaseStages(): string[] {
+  const custom = getCustomCaseStages();
+  const set = new Set<string>([...CASE_STAGES, ...custom]);
+  return Array.from(set);
+}
 
 export interface CaseRecord {
   id: string;
@@ -60,6 +108,8 @@ export interface CaseRecord {
   status: 'ACTIVE' | 'CLOSED';
   created_by?: string | null;
   created_at: string;
+  opponent_name?: string | null;
+  judge_name?: string | null;
 
   // Joined relations
   project_code?: CoreProjectCode | null;
@@ -82,6 +132,38 @@ export interface QuotationRecord {
   gst_applicable?: boolean;
   notes?: string | null;
   created_at?: string;
+}
+
+export const EXPENSE_CATEGORIES = [
+  'DOCUMENTATION',
+  'NOTARY',
+  'TRAVEL_CONVEYANCE',
+  'COURT_FEE',
+  'PROCESS_SUMMONS',
+  'PHOTOCOPY_PRINTING',
+  'COURIER_POSTAGE',
+  'TRANSLATION',
+  'MISCELLANEOUS',
+] as const;
+
+export type ExpenseCategory = typeof EXPENSE_CATEGORIES[number];
+
+export interface StageExpenseRecord {
+  id: string;
+  project_code_id?: string;
+  amount: number;
+  category: ExpenseCategory | string;
+  description: string;
+  stage?: string;
+  hearing_id?: string;
+  billable: boolean;
+  payment_mode?: string;
+  date?: string;
+  incurred_date?: string;
+  actor_name?: string;
+  created_by?: string;
+  created_by_profile?: CoreProfile | null;
+  created_at: string;
 }
 
 export interface ClientNoteRecord {
@@ -358,6 +440,7 @@ export interface CoreProjectCode {
   code_normalized: string;
   prefix?: string | null;
   department: string;
+  matter_type?: string | null;
   client_id: string;
   title: string;
   status: string;

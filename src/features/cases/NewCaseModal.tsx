@@ -7,6 +7,7 @@ import {
 } from '../../lib/api';
 import { getStoredUser, isSuperAdminOrFinance, formatProfileRole } from '../../lib/auth';
 import type { CoreClient, CoreProfile, CaseType, ClientRole } from '../../lib/types';
+import { getAllCaseStages } from '../../lib/types';
 import { ClientSearchSelect } from '../../components/common/ClientSearchSelect';
 
 interface NewCaseModalProps {
@@ -519,15 +520,11 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
                 onChange={(e) => setCurrentStage(e.target.value)}
                 className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
               >
-                <option value="Notice sent">Notice sent</option>
-                <option value="Notice served">Notice served</option>
-                <option value="Suit filed">Suit filed</option>
-                <option value="Summons">Summons</option>
-                <option value="Written statement">Written statement</option>
-                <option value="Interim application">Interim application</option>
-                <option value="Evidence">Evidence</option>
-                <option value="Final arguments">Final arguments</option>
-                <option value="Judgment">Judgment</option>
+                {getAllCaseStages().map((st) => (
+                  <option key={st} value={st}>
+                    {st}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

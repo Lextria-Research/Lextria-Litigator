@@ -16,7 +16,7 @@ import { fetchCases, fetchClients, fetchProfiles } from '../../lib/api';
 import { clock } from '../../lib/clock';
 import { formatINRShort } from '../../lib/currency';
 import { getStoredUser, isSuperAdminOrFinance, canEditCaseData } from '../../lib/auth';
-import { CASE_STAGES, CaseRecord, CoreClient, CoreProfile } from '../../lib/types';
+import { CASE_STAGES, CaseRecord, CoreClient, CoreProfile, getAllCaseStages } from '../../lib/types';
 import { NewCaseModal } from './NewCaseModal';
 import { ClientSearchSelect } from '../../components/common/ClientSearchSelect';
 
@@ -165,7 +165,7 @@ export const CasesListView: React.FC = () => {
               className="w-full px-2 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
             >
               <option value="">All Stages</option>
-              {CASE_STAGES.map((st) => (
+              {getAllCaseStages().map((st) => (
                 <option key={st} value={st}>
                   {st}
                 </option>

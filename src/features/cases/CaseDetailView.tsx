@@ -24,6 +24,9 @@ import {
   Coins,
   Edit2,
   Trash2,
+  Receipt,
+  IndianRupee,
+  Layers,
 } from 'lucide-react';
 import {
   fetchCaseById,
@@ -44,6 +47,7 @@ import {
   deleteInternalNote,
   fetchLinkedIP,
   createLinkedIP,
+  deleteLinkedIP,
   fetchDeadlines,
   createDeadline,
   updateDeadline,
@@ -55,6 +59,9 @@ import {
   updateClientNote,
   deleteClientNote,
   saveCaseQuotation,
+  fetchCaseExpenses,
+  deleteStageExpense,
+  fetchProjectCodes,
 } from '../../lib/api';
 import { clock } from '../../lib/clock';
 import { formatINR, formatINRShort } from '../../lib/currency';
@@ -78,6 +85,10 @@ import {
   CoreMatterEvent,
   CoreProfile,
   CoreDocument,
+  StageExpenseRecord,
+  EXPENSE_CATEGORIES,
+  getAllCaseStages,
+  CoreProjectCode,
 } from '../../lib/types';
 import { UpdateHearingModal } from './UpdateHearingModal';
 import { EditCaseModal } from './EditCaseModal';
@@ -87,6 +98,7 @@ import { EditPartyModal } from './EditPartyModal';
 import { AddMilestoneModal } from './AddMilestoneModal';
 import { QuotationModal } from './QuotationModal';
 import { DocumentViewerModal } from './DocumentViewerModal';
+import { RecordExpenseModal } from './RecordExpenseModal';
 
 type TabKey =
   | 'timeline'
@@ -97,6 +109,7 @@ type TabKey =
   | 'notes'
   | 'client_notes'
   | 'documents'
+  | 'expenses'
   | 'linked_ip';
 
 export const CaseDetailView: React.FC = () => {
@@ -190,10 +203,17 @@ export const CaseDetailView: React.FC = () => {
   const [newPartyCounsel, setNewPartyCounsel] = useState('');
   const [addingParty, setAddingParty] = useState(false);
 
-  // Linked IP inline
+  // Connected Matters & Universal Inter-Project Linking state
   const [newIpRef, setNewIpRef] = useState('');
   const [newIpRelation, setNewIpRelation] = useState<'ENFORCES' | 'DEFENDS' | 'CHALLENGES' | 'OTHER'>('ENFORCES');
+  const [selectedProjectCodeId, setSelectedProjectCodeId] = useState('');
+  const [allProjectCodes, setAllProjectCodes] = useState<CoreProjectCode[]>([]);
   const [addingIp, setAddingIp] = useState(false);
+
+  // Stage Expenses state
+  const [expenses, setExpenses] = useState<StageExpenseRecord[]>([]);
+  const [expenseModalOpen, setExpenseModalOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<StageExpenseRecord | null>(null);
 
   // Document upload state
   const [uploadCategory, setUploadCategory] = useState<string>('Pleadings');
@@ -310,6 +330,19 @@ export const CaseDetailView: React.FC = () => {
     return events.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
   }, [theCase, hearings, orders, deadlines, timeline]);
 
+  // Expenses sums
+  const totalExpenses = useMemo(() => {
+    return expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [expenses]);
+
+  const billableExpenses = useMemo(() => {
+    return expenses.filter((e) => e.billable).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [expenses]);
+
+  const nonBillableExpenses = useMemo(() => {
+    return totalExpenses - billableExpenses;
+  }, [totalExpenses, billableExpenses]);
+
   // Active quotation document (if any uploaded under Quotation category or file name)
   const quotationDoc = useMemo(() => {
     return (
@@ -339,13 +372,14 @@ export const CaseDetailView: React.FC = () => {
       const c = await fetchCaseById(id);
       setTheCase(c);
 
-      const [hList, oList, dList, pList, ipList, profs] = await Promise.all([
+      const [hList, oList, dList, pList, ipList, profs, allPcs] = await Promise.all([
         fetchHearings(id),
         fetchOrders(id),
         fetchDeadlines({ caseId: id }),
         fetchParties(id),
         fetchLinkedIP(id),
         fetchProfiles(),
+        fetchProjectCodes().catch(() => []),
       ]);
 
       setHearings(hList);
@@ -354,16 +388,19 @@ export const CaseDetailView: React.FC = () => {
       setParties(pList);
       setLinkedIp(ipList);
       setProfiles(profs);
+      setAllProjectCodes(allPcs || []);
 
       if (c.project_code_id) {
-        const [docs, events, cNotes] = await Promise.all([
+        const [docs, events, cNotes, expList] = await Promise.all([
           fetchProjectDocuments(c.project_code_id),
           fetchMatterEvents(c.project_code_id),
           fetchClientNotes(c.project_code_id),
+          fetchCaseExpenses(c.project_code_id),
         ]);
         setDocuments(docs);
         setTimeline(events);
         setClientNotes(cNotes);
+        setExpenses(expList || []);
       }
 
       // Load internal notes (for internal legal team reference)
@@ -479,21 +516,52 @@ export const CaseDetailView: React.FC = () => {
 
   const handleAddLinkedIp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newIpRef.trim()) return;
+    let refToUse = newIpRef.trim();
+    let projectCodeIdToLink: string | null = null;
+
+    if (selectedProjectCodeId) {
+      const match = allProjectCodes.find((p) => p.id === selectedProjectCodeId);
+      if (match) {
+        refToUse = match.code;
+        projectCodeIdToLink = match.id;
+      }
+    } else if (refToUse) {
+      const match = allProjectCodes.find(
+        (p) => p.code.toLowerCase() === refToUse.toLowerCase()
+      );
+      if (match) {
+        projectCodeIdToLink = match.id;
+      }
+    }
+
+    if (!refToUse) return;
     setAddingIp(true);
     try {
       await createLinkedIP({
         case_id: theCase.id,
-        ip_reference: newIpRef.trim(),
+        project_code_id: projectCodeIdToLink,
+        ip_reference: refToUse.toUpperCase(),
         relation: newIpRelation,
       });
       setNewIpRef('');
+      setSelectedProjectCodeId('');
       const updatedIp = await fetchLinkedIP(theCase.id);
       setLinkedIp(updatedIp);
     } catch (err: any) {
       alert(err.message);
     } finally {
       setAddingIp(false);
+    }
+  };
+
+  const handleDeleteLinkedIp = async (linkId: string) => {
+    if (!confirm('Are you sure you want to disconnect this matter / project?')) return;
+    try {
+      await deleteLinkedIP(linkId);
+      const updatedIp = await fetchLinkedIP(theCase.id);
+      setLinkedIp(updatedIp);
+    } catch (err: any) {
+      alert(err.message);
     }
   };
 
@@ -715,6 +783,21 @@ export const CaseDetailView: React.FC = () => {
               {theCase.court_fee ? formatINR(theCase.court_fee) : <span className="text-slate-400 font-normal">—</span>}
             </div>
           </div>
+          <div>
+            <div className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1">
+              <Receipt className="w-3 h-3 text-amber-500" />
+              <span>Incurred Expenses</span>
+            </div>
+            <div className="font-semibold text-slate-800 dark:text-slate-200">
+              {totalExpenses > 0 ? (
+                <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">
+                  {formatINR(totalExpenses)}
+                </span>
+              ) : (
+                <span className="text-slate-400 font-normal">₹0 logged</span>
+              )}
+            </div>
+          </div>
           {/* 4. Quotation Document & Fee (Strictly SUPER_ADMIN and FINANCE only) */}
           {canViewQuotation && (
             <div className="bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/50 rounded-xl p-3 space-y-1.5">
@@ -785,10 +868,11 @@ export const CaseDetailView: React.FC = () => {
           { key: 'deadlines', label: `Deadlines (${deadlines.length})`, icon: Clock },
           { key: 'hearings', label: `Hearings (${hearings.length})`, icon: Calendar },
           { key: 'orders', label: `Orders (${orders.length})`, icon: Scale },
+          { key: 'expenses', label: `Expenses Incurred (${expenses.length})`, icon: Receipt },
           { key: 'notes', label: `Internal Notes (${notes.length})`, icon: FileText },
           { key: 'client_notes', label: `Client Notes (${clientNotes.length})`, icon: MessageSquare },
           { key: 'documents', label: `Document Vault (${visibleDocuments.length})`, icon: FolderLock },
-          { key: 'linked_ip', label: `Linked IP (${linkedIp.length})`, icon: LinkIcon },
+          { key: 'linked_ip', label: `Connected Matters (${linkedIp.length})`, icon: LinkIcon },
         ].map((tab) => (
           <button
             key={tab.key}
@@ -1837,77 +1921,365 @@ export const CaseDetailView: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 9: LINKED IP */}
-      {activeTab === 'linked_ip' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+      {/* TAB 8b: STAGE-WISE EXPENSES INCURRED */}
+      {activeTab === 'expenses' && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-5">
+          {/* Header & Action */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div>
-              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-                Linked IP Bridge
+              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span>Stage-Wise Expenses Incurred</span>
               </h3>
               <p className="text-[11px] text-slate-500">
-                Relational bridge linking court enforcement to IP prosecution filings (Patents, Trademarks)
+                Operational and statutory outlays recorded at every stage (documentation, notary, travel, process fees, translation, court charges). Synchronized with Finance.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setEditingExpense(null);
+                setExpenseModalOpen(true);
+              }}
+              className="px-3.5 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-emerald-600/20"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Record Stage Expense</span>
+            </button>
+          </div>
+
+          {/* Quick Metrics Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                Total Expenses Incurred
+              </div>
+              <div className="text-lg font-bold text-slate-900 dark:text-slate-100 mt-0.5">
+                {formatINR(totalExpenses)}
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                {expenses.length} expense record{expenses.length === 1 ? '' : 's'} across stages
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/40 dark:bg-emerald-950/20">
+              <div className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wider">
+                Billable to Client
+              </div>
+              <div className="text-lg font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">
+                {formatINR(billableExpenses)}
+              </div>
+              <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">
+                Pass-through outlays recoverable on invoice
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                Internal Overhead (Non-Billable)
+              </div>
+              <div className="text-lg font-bold text-slate-700 dark:text-slate-300 mt-0.5">
+                {formatINR(nonBillableExpenses)}
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                Internal operational firm overhead
+              </div>
+            </div>
+          </div>
+
+          {/* List of expenses */}
+          {expenses.length === 0 ? (
+            <div className="py-12 text-center space-y-2">
+              <Receipt className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto" />
+              <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                No Stage Expenses Recorded Yet
+              </div>
+              <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                Track outlays for notary, affidavits, documentation, process fees, translation, travel, or court charges at any stage.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingExpense(null);
+                  setExpenseModalOpen(true);
+                }}
+                className="mt-2 px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition inline-flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Record First Expense</span>
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 uppercase">
+                    <th className="py-2.5 px-3">Date</th>
+                    <th className="py-2.5 px-3">Stage</th>
+                    <th className="py-2.5 px-3">Category</th>
+                    <th className="py-2.5 px-3">Itemization / Notes</th>
+                    <th className="py-2.5 px-3">Billing</th>
+                    <th className="py-2.5 px-3 text-right">Amount</th>
+                    <th className="py-2.5 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {expenses.map((exp) => (
+                    <tr key={exp.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition">
+                      <td className="py-3 px-3 whitespace-nowrap font-mono text-slate-600 dark:text-slate-400">
+                        {clock.formatDisplay(exp.date)}
+                      </td>
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-900/40">
+                          {exp.stage || 'General'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <span className="font-medium text-slate-800 dark:text-slate-200">
+                          {exp.category}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <p className="text-slate-700 dark:text-slate-300 max-w-md line-clamp-2">
+                          {exp.description || '—'}
+                        </p>
+                        <span className="text-[10px] text-slate-400 block mt-0.5">
+                          Logged by {exp.actor_name || 'Team Member'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        {exp.billable ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                            Billable
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                            Overhead
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 whitespace-nowrap text-right font-bold font-mono text-slate-900 dark:text-slate-100">
+                        {formatINR(exp.amount)}
+                      </td>
+                      <td className="py-3 px-3 whitespace-nowrap text-right">
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingExpense(exp);
+                              setExpenseModalOpen(true);
+                            }}
+                            className="p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 rounded transition"
+                            title="Edit Incurred Expense"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!confirm(`Are you sure you want to delete this ${formatINR(exp.amount)} expense record?`)) return;
+                              try {
+                                await deleteStageExpense(exp.id);
+                                loadCase();
+                              } catch (err: any) {
+                                alert(err.message);
+                              }
+                            }}
+                            className="p-1 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded transition"
+                            title="Delete Expense Record"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 9: CONNECTED MATTERS & UNIVERSAL LINKING */}
+      {activeTab === 'linked_ip' && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div>
+              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <LinkIcon className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span>Connected Matters &amp; Projects</span>
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Universal relational bridge connecting this litigation matter to legal notices, agreements, court suits, or IP prosecution files (Patents/Trademarks).
               </p>
             </div>
           </div>
 
-          {/* Add Linked IP Form */}
+          {/* Add Connection Form */}
           {canEdit && (
-            <form onSubmit={handleAddLinkedIp} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-3">
-              <div className="text-xs font-bold text-slate-700 dark:text-slate-300">Attach IP Reference</div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <input
-                  type="text"
-                  required
-                  value={newIpRef}
-                  onChange={(e) => setNewIpRef(e.target.value)}
-                  placeholder="IP Application / Reg No. (e.g. IN-PAT-20244100202)"
-                  className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg sm:col-span-2 font-mono"
-                />
-                <select
-                  value={newIpRelation}
-                  onChange={(e) => setNewIpRelation(e.target.value as any)}
-                  className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
-                >
-                  <option value="ENFORCES">ENFORCES (Patent/TM Infringement)</option>
-                  <option value="DEFENDS">DEFENDS</option>
-                  <option value="CHALLENGES">CHALLENGES (Rectification/Revocation)</option>
-                  <option value="OTHER">OTHER</option>
-                </select>
+            <form onSubmit={handleAddLinkedIp} className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-3">
+              <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                Connect Matter or Intellectual Property Asset
               </div>
-              <div className="flex justify-end">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold text-slate-500">
+                    Select Existing Firm Matter
+                  </label>
+                  <select
+                    value={selectedProjectCodeId}
+                    onChange={(e) => {
+                      setSelectedProjectCodeId(e.target.value);
+                      if (e.target.value) {
+                        const match = allProjectCodes.find((p) => p.id === e.target.value);
+                        if (match) setNewIpRef(match.code);
+                      }
+                    }}
+                    className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 font-mono"
+                  >
+                    <option value="">-- Choose Matter / Agreement / Case --</option>
+                    {allProjectCodes
+                      .filter((p) => p.id !== theCase.project_code_id)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.code} • {p.matter_type || 'Matter'} ({p.client?.client_name || 'Client'})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold text-slate-500">
+                    Or Enter Code / External Reference
+                  </label>
+                  <input
+                    type="text"
+                    value={newIpRef}
+                    onChange={(e) => setNewIpRef(e.target.value)}
+                    placeholder="e.g. AG-0014, LC41, or IN-PAT-2024..."
+                    className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg font-mono text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold text-slate-500">
+                    Relational Context
+                  </label>
+                  <select
+                    value={newIpRelation}
+                    onChange={(e) => setNewIpRelation(e.target.value as any)}
+                    className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                  >
+                    <option value="ENFORCES">ENFORCES (Enforces Agreement / IP)</option>
+                    <option value="DEFENDS">DEFENDS (Defends Against Claim)</option>
+                    <option value="CHALLENGES">CHALLENGES (Rectification / Dispute)</option>
+                    <option value="OTHER">OTHER (Companion / Cross-Reference)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-1">
                 <button
                   type="submit"
-                  disabled={addingIp}
-                  className="px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
+                  disabled={addingIp || (!selectedProjectCodeId && !newIpRef.trim())}
+                  className="px-4 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm transition flex items-center gap-1.5 disabled:opacity-50"
                 >
-                  {addingIp ? 'Attaching...' : 'Attach IP Asset'}
+                  <LinkIcon className="w-3.5 h-3.5" />
+                  <span>{addingIp ? 'Connecting...' : 'Connect Matter'}</span>
                 </button>
               </div>
             </form>
           )}
 
+          {/* List of Connected Matters */}
           {linkedIp.length === 0 ? (
-            <div className="py-8 text-center text-xs text-slate-400">
-              No patent or trademark assets attached to this litigation.
+            <div className="py-10 text-center space-y-1">
+              <LinkIcon className="w-7 h-7 text-slate-300 dark:text-slate-600 mx-auto" />
+              <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                No Connected Matters or IP Assets
+              </div>
+              <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                Connect companion court cases, underlying commercial agreements, legal notices, or patent/trademark filings to build a 360° matter view.
+              </p>
             </div>
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {linkedIp.map((item) => (
-                <div key={item.id} className="py-3 flex items-center justify-between">
-                  <div>
-                    <div className="font-bold text-xs text-slate-900 dark:text-slate-100 font-mono">
-                      {item.ip_reference}
+              {linkedIp.map((item) => {
+                const codeMatch = allProjectCodes.find(
+                  (p) => p.id === item.project_code_id || p.code.toLowerCase() === item.ip_reference?.toLowerCase()
+                );
+                const code = item.ip_reference || item.project_code?.code || 'Connected Matter';
+                const isAgreement = code.startsWith('AG') || codeMatch?.matter_type === 'AGREEMENT';
+                const isCase = code.startsWith('LC') || codeMatch?.matter_type === 'LITIGATION';
+
+                return (
+                  <div key={item.id} className="py-3 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+                        <LinkIcon className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs text-slate-900 dark:text-slate-100 font-mono">
+                            {code}
+                          </span>
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-300 font-mono">
+                            {item.relation}
+                          </span>
+                          {codeMatch && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                              {codeMatch.matter_type || 'Firm Project'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          {codeMatch?.client?.client_name ? `Client: ${codeMatch.client.client_name}` : 'Ecosystem Link'}
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-[11px] text-slate-500">
-                      Relationship: <span className="font-semibold text-indigo-600">{item.relation}</span>
+
+                    <div className="flex items-center gap-2">
+                      {isAgreement && (
+                        <button
+                          type="button"
+                          onClick={() => navigate('/agreements')}
+                          className="px-2.5 py-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 rounded-md transition flex items-center gap-1"
+                          title="Open in Agreements Docket"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>View Agreement</span>
+                        </button>
+                      )}
+                      {isCase && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (codeMatch?.id) navigate(`/cases/${codeMatch.id}`);
+                          }}
+                          className="px-2.5 py-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 rounded-md transition flex items-center gap-1"
+                          title="Open Case File"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>View Case</span>
+                        </button>
+                      )}
+
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteLinkedIp(item.id)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded transition"
+                          title="Disconnect / Remove Link"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded font-mono text-slate-600 dark:text-slate-400">
-                    IP-BRIDGE
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -2026,6 +2398,21 @@ export const CaseDetailView: React.FC = () => {
         projectCodeId={theCase.project_code_id}
         existingMilestone={targetMilestone}
       />
+
+      {/* Record / Edit Stage Expense Modal */}
+      {theCase.project_code_id && (
+        <RecordExpenseModal
+          isOpen={expenseModalOpen}
+          onClose={() => {
+            setExpenseModalOpen(false);
+            setEditingExpense(null);
+          }}
+          onSuccess={loadCase}
+          projectCodeId={theCase.project_code_id}
+          defaultStage={theCase.current_stage || 'Hearing'}
+          existingExpense={editingExpense}
+        />
+      )}
     </div>
   );
 };

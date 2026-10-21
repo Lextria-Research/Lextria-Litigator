@@ -15,6 +15,7 @@ import { DeadlinesView } from './features/deadlines/DeadlinesView';
 import { IntegrationsView } from './features/admin/IntegrationsView';
 import { SettingsView } from './features/settings/SettingsView';
 import { LoginView } from './features/auth/LoginView';
+import { LegalNoticesView } from './features/notices/LegalNoticesView';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,6 +37,7 @@ export const App: React.FC = () => {
             <Route path="calendar" element={<CalendarView />} />
             <Route path="cases" element={<CasesListView />} />
             <Route path="cases/:id" element={<CaseDetailView />} />
+            <Route path="notices" element={<LegalNoticesView />} />
             <Route path="cause-list" element={<Navigate to="/cases" replace />} />
             <Route path="agreements" element={<AgreementsKanbanView />} />
             <Route path="agreements/:id" element={<AgreementDetailView />} />

@@ -24,6 +24,7 @@ import type {
   AgreementStage,
   QuotationRecord,
   ClientNoteRecord,
+  StageExpenseRecord,
 } from './types';
 import { getStoredUser, isSuperAdminOrFinance } from './auth';
 
@@ -533,6 +534,7 @@ export async function fetchCases(filters?: {
   clientId?: string;
   search?: string;
   dateRange?: { start?: string; end?: string };
+  includePreLitigation?: boolean;
 }): Promise<CaseRecord[]> {
   // 1. Try litigator.cases_view
   let query = litigatorDb
@@ -607,6 +609,10 @@ export async function fetchCases(filters?: {
         (c.court && c.court.toLowerCase().includes(s)) ||
         (c.project_code?.code && c.project_code.code.toLowerCase().includes(s))
     );
+  }
+
+  if (!filters?.includePreLitigation) {
+    cases = cases.filter((c) => c.case_type !== 'PRE_LITIGATION');
   }
 
   return cases;
@@ -916,6 +922,12 @@ export async function updateAfterHearing(params: {
   nextPurpose?: string | null;
   attendedBy?: string | null;
   orderDocumentId?: string | null;
+  expense?: {
+    amount: number;
+    category: string;
+    description?: string;
+    billable?: boolean;
+  } | null;
 }) {
   let hearingId = params.hearingId;
 
@@ -1010,6 +1022,26 @@ export async function updateAfterHearing(params: {
     actorUserId: params.attendedBy || undefined,
     clientVisible: true,
   });
+
+  // 4b. Record stage expense if logged with this hearing outcome
+  if (params.expense && Number(params.expense.amount) > 0 && theCase.project_code_id) {
+    try {
+      await saveStageExpense({
+        projectCodeId: theCase.project_code_id,
+        amount: Number(params.expense.amount),
+        category: params.expense.category || 'Documentation',
+        description:
+          params.expense.description ||
+          `Expense incurred during hearing for ${params.purpose}: ${params.outcome || 'Hearing attended'}`,
+        stage: theCase.current_stage || 'Hearing',
+        hearing_id: hearingId,
+        billable: params.expense.billable !== false,
+        date: params.hearingDate,
+      });
+    } catch (expErr) {
+      console.warn('Could not record stage expense for hearing:', expErr);
+    }
+  }
 
   // 5. Post or queue Cliq alert card
   await postCliqAlert({
@@ -1303,6 +1335,14 @@ export async function createLinkedIP(params: Partial<LinkedIPRecord>) {
     .single();
   if (error) throw error;
   return data as LinkedIPRecord;
+}
+
+export async function deleteLinkedIP(id: string): Promise<void> {
+  const { error } = await litigatorDb
+    .from('linked_ip')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
 }
 
 // ==========================================
@@ -2152,6 +2192,289 @@ export async function deleteMatterEvent(eventId: string): Promise<void> {
     .delete()
     .eq('id', eventId);
   if (error) throw error;
+}
+
+// ==========================================
+// 10b. STAGE EXPENSES & LEGAL NOTICES
+// ==========================================
+
+export async function fetchCaseExpenses(projectCodeId: string): Promise<StageExpenseRecord[]> {
+  if (!projectCodeId) return [];
+  const { data, error } = await coreDb
+    .from('matter_events')
+    .select('*')
+    .eq('project_code_id', projectCodeId)
+    .eq('event_code', 'STAGE_EXPENSE')
+    .order('occurred_at', { ascending: false });
+
+  if (error) {
+    console.warn('Could not fetch stage expenses:', error.message);
+    return [];
+  }
+
+  let profileMap = new Map<string, string>();
+  try {
+    const profs = await fetchProfiles();
+    profs.forEach((p) => profileMap.set(p.id, p.display_name));
+  } catch {
+    // ignore
+  }
+
+  return (data || []).map((row: any) => {
+    const meta = row.metadata || {};
+    return {
+      id: row.id,
+      amount: Number(meta.amount) || 0,
+      category: meta.category || 'Other',
+      description: meta.description || row.detail || '',
+      stage: meta.stage || '',
+      hearing_id: meta.hearing_id || '',
+      billable: meta.billable !== false,
+      date: (row.occurred_at || '').split('T')[0],
+      created_at: row.created_at,
+      actor_name: profileMap.get(row.actor_user_id) || 'Team Member',
+    };
+  });
+}
+
+export async function saveStageExpense(params: {
+  projectCodeId: string;
+  amount: number;
+  category: string;
+  description?: string;
+  stage?: string;
+  hearing_id?: string;
+  billable?: boolean;
+  date?: string;
+}): Promise<StageExpenseRecord> {
+  const stored = getStoredUser();
+  const { data: authData } = await supabase.auth.getUser();
+  const actorId =
+    authData?.user?.id || stored?.id || '5b488b59-915c-4f02-b973-748cf9a46902';
+  const occurredAt = params.date
+    ? new Date(params.date).toISOString()
+    : clock.nowISO();
+
+  const amt = Number(params.amount) || 0;
+  const stage = params.stage || 'General';
+  const title = `Expense Incurred (${stage}): ₹${amt.toLocaleString('en-IN')} - ${params.category}`;
+  const detail =
+    params.description ||
+    `${params.category} expense of ₹${amt.toLocaleString('en-IN')} logged for ${stage} stage. Billable to client: ${
+      params.billable !== false ? 'Yes' : 'No'
+    }.`;
+
+  const { data, error } = await coreDb
+    .from('matter_events')
+    .insert({
+      project_code_id: params.projectCodeId,
+      event_code: 'STAGE_EXPENSE',
+      title,
+      detail,
+      occurred_at: occurredAt,
+      actor_user_id: actorId,
+      source_app: 'LITIGATOR',
+      client_visible: false,
+      client_label: 'Stage Expense',
+      metadata: {
+        amount: amt,
+        category: params.category,
+        description: params.description || '',
+        stage: params.stage || '',
+        hearing_id: params.hearing_id || '',
+        billable: params.billable !== false,
+        expense_type: 'STAGE_EXPENSE',
+      },
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Failed to save stage expense:', error);
+    throw error;
+  }
+
+  return {
+    id: data.id,
+    amount: amt,
+    category: params.category,
+    description: params.description || '',
+    stage: params.stage || '',
+    hearing_id: params.hearing_id || '',
+    billable: params.billable !== false,
+    date: (data.occurred_at || '').split('T')[0],
+    created_at: data.created_at,
+    actor_name: stored?.display_name || 'Team Member',
+  };
+}
+
+export async function updateStageExpense(
+  id: string,
+  params: Partial<StageExpenseRecord>
+): Promise<void> {
+  const { data: current, error: getErr } = await coreDb
+    .from('matter_events')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (getErr || !current) throw new Error('Expense record not found');
+
+  const meta = {
+    ...(current.metadata || {}),
+    ...(params.amount !== undefined ? { amount: Number(params.amount) } : {}),
+    ...(params.category !== undefined ? { category: params.category } : {}),
+    ...(params.description !== undefined ? { description: params.description } : {}),
+    ...(params.stage !== undefined ? { stage: params.stage } : {}),
+    ...(params.billable !== undefined ? { billable: params.billable } : {}),
+  };
+
+  const amount = Number(meta.amount) || 0;
+  const category = meta.category || 'Other';
+  const stage = meta.stage || 'General';
+  const title = `Expense Incurred (${stage}): ₹${amount.toLocaleString('en-IN')} - ${category}`;
+  const detail =
+    meta.description ||
+    `${category} expense of ₹${amount.toLocaleString('en-IN')} logged for ${stage} stage. Billable: ${
+      meta.billable !== false ? 'Yes' : 'No'
+    }.`;
+
+  const updatePayload: any = {
+    title,
+    detail,
+    metadata: meta,
+  };
+
+  if (params.date) {
+    updatePayload.occurred_at = new Date(params.date).toISOString();
+  }
+
+  const { error } = await coreDb
+    .from('matter_events')
+    .update(updatePayload)
+    .eq('id', id);
+
+  if (error) {
+    console.error('Failed to update stage expense:', error);
+    throw error;
+  }
+}
+
+export async function deleteStageExpense(id: string): Promise<void> {
+  const { error } = await coreDb
+    .from('matter_events')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error('Failed to delete stage expense:', error);
+    throw error;
+  }
+}
+
+export async function fetchLegalNotices(filters?: {
+  stage?: string;
+  leadUserId?: string;
+  clientId?: string;
+  search?: string;
+}): Promise<CaseRecord[]> {
+  const allCases = await fetchCases({
+    stage: filters?.stage,
+    leadUserId: filters?.leadUserId,
+    clientId: filters?.clientId,
+    search: filters?.search,
+    includePreLitigation: true,
+  });
+
+  return allCases.filter((c) => c.case_type === 'PRE_LITIGATION');
+}
+
+export async function convertNoticeToCourtCase(params: {
+  caseId: string;
+  courtName: string;
+  bench?: string;
+  caseNumber?: string;
+  cnrNumber?: string;
+  caseType: string;
+  filingDate?: string;
+  judgeName?: string;
+  stage?: string;
+}): Promise<CaseRecord> {
+  const { data: updatedCase, error } = await litigatorDb
+    .from('cases')
+    .update({
+      case_type: params.caseType,
+      court: params.courtName,
+      bench: params.bench || null,
+      case_number: params.caseNumber || null,
+      cnr_number: params.cnrNumber || null,
+      filing_date: params.filingDate || clock.todayYMD(),
+      judge_name: params.judgeName || null,
+      current_stage: params.stage || 'Pleadings',
+    })
+    .eq('id', params.caseId)
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Failed to convert notice to court case:', error);
+    throw error;
+  }
+
+  if (updatedCase.project_code_id) {
+    await recordMatterEvent({
+      projectCodeId: updatedCase.project_code_id,
+      eventCode: 'NOTICE_CONVERTED',
+      title: `Legal Notice Converted to Court Suit: ${params.courtName}`,
+      detail: `Legal notice transitioned into formal court proceeding. Court: ${params.courtName}${
+        params.bench ? ` (${params.bench})` : ''
+      }. Case No: ${params.caseNumber || 'Pending'}${
+        params.cnrNumber ? ` | CNR: ${params.cnrNumber}` : ''
+      }. Date of filing: ${params.filingDate || clock.todayYMD()}`,
+      occurredAt: params.filingDate ? new Date(params.filingDate).toISOString() : clock.nowISO(),
+      clientVisible: true,
+      clientLabel: 'Notice converted to court case',
+      metadata: {
+        previous_case_type: 'PRE_LITIGATION',
+        converted_case_type: params.caseType,
+        court_name: params.courtName,
+        case_number: params.caseNumber,
+      },
+    });
+  }
+
+  return fetchCaseById(params.caseId);
+}
+
+export async function getNextProjectCode(department: string = 'LITIGATION'): Promise<string> {
+  const prefix = department === 'AGREEMENTS' ? 'AG' : 'LC';
+  try {
+    const { data, error } = await coreDb
+      .from('project_codes')
+      .select('code')
+      .like('code', `${prefix}%`)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error || !data || data.length === 0) {
+      return `${prefix}1`;
+    }
+
+    let maxNum = 0;
+    for (const row of data) {
+      const match = (row.code || '').match(/^(?:LC|AG)[-_\s]*(\d+)$/i);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num > maxNum) {
+          maxNum = num;
+        }
+      }
+    }
+
+    return `${prefix}${maxNum + 1}`;
+  } catch {
+    return `${prefix}1`;
+  }
 }
 
 // ==========================================

@@ -18,6 +18,7 @@ import {
 import { fetchProfiles, createTeamUser, deleteTeamUser } from '../../lib/api';
 import { getStoredUser, canManageTeam, formatProfileRole } from '../../lib/auth';
 import type { CoreProfile } from '../../lib/types';
+import { CASE_STAGES, getCustomCaseStages, addCustomCaseStage, removeCustomCaseStage } from '../../lib/types';
 
 export const SettingsView: React.FC = () => {
   const currentUser = getStoredUser();
@@ -71,6 +72,30 @@ export const SettingsView: React.FC = () => {
   const agreementsCount = useMemo(() => {
     return profiles.filter((p) => p.role === 'ASSOCIATE' && p.department === 'AGREEMENT').length;
   }, [profiles]);
+
+  // Case Lifecycle Stages Management
+  const [customStages, setCustomStages] = useState<string[]>(getCustomCaseStages());
+  const [newStageInput, setNewStageInput] = useState('');
+  const [stageError, setStageError] = useState<string | null>(null);
+
+  const handleAddStage = (e: React.FormEvent) => {
+    e.preventDefault();
+    const stage = newStageInput.trim();
+    if (!stage) return;
+    if (customStages.includes(stage) || (CASE_STAGES as readonly string[]).includes(stage)) {
+      setStageError('This stage already exists.');
+      return;
+    }
+    addCustomCaseStage(stage);
+    setCustomStages(getCustomCaseStages());
+    setNewStageInput('');
+    setStageError(null);
+  };
+
+  const handleRemoveStage = (stage: string) => {
+    removeCustomCaseStage(stage);
+    setCustomStages(getCustomCaseStages());
+  };
 
   const handleOpenAddModal = () => {
     setNewName('');
@@ -416,6 +441,102 @@ export const SettingsView: React.FC = () => {
             })}
           </div>
         )}
+      </div>
+
+      {/* Case Stages & Court Workflow Management Card */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div>
+            <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <Scale className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+              <span>Case Stages &amp; Court Workflow</span>
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Manage litigation lifecycle stages available across case entries, hearings, and outcome logs without cluttering case forms
+            </p>
+          </div>
+        </div>
+
+        {stageError && (
+          <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{stageError}</span>
+          </div>
+        )}
+
+        {/* Add Stage Form */}
+        <form onSubmit={handleAddStage} className="flex flex-col sm:flex-row gap-2 max-w-xl">
+          <input
+            type="text"
+            value={newStageInput}
+            onChange={(e) => {
+              setNewStageInput(e.target.value);
+              setStageError(null);
+            }}
+            placeholder="Enter custom stage (e.g. Cross Examination, Mediation, Arbitration Award...)"
+            className="flex-1 px-3.5 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+          />
+          <button
+            type="submit"
+            className="px-4 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Custom Stage</span>
+          </button>
+        </form>
+
+        {/* Stages Display */}
+        <div className="space-y-3 pt-2">
+          <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+            Active Workflow Stages ({CASE_STAGES.length + customStages.length})
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {/* Standard Stages */}
+            {CASE_STAGES.map((stage) => {
+              const isSpecial = stage === 'Disposed' || stage === 'Withdrawn';
+              return (
+                <div
+                  key={stage}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border ${
+                    isSpecial
+                      ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                      : 'bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <span>{stage}</span>
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    {isSpecial ? '• terminal' : '• default'}
+                  </span>
+                </div>
+              );
+            })}
+
+            {/* Custom Stages */}
+            {customStages.map((stage) => (
+              <div
+                key={stage}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+              >
+                <span>{stage}</span>
+                <span className="text-[10px] bg-indigo-200 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 px-1.5 py-0.2 rounded font-normal">
+                  Custom
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveStage(stage)}
+                  className="text-slate-400 hover:text-rose-600 transition cursor-pointer p-0.5 rounded"
+                  title={`Remove ${stage}`}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-400 pt-1">
+            Standard stages include core court processes including <strong>Disposed</strong> and <strong>Withdrawn</strong>. Custom stages added here appear instantly in case creation, editing, and hearing outcomes.
+          </p>
+        </div>
       </div>
 
       {/* Add Team Member Modal */}

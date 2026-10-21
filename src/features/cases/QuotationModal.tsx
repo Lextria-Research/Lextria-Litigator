@@ -11,11 +11,13 @@ import {
   Check,
   Trash2,
   Calendar,
+  Receipt,
+  IndianRupee,
 } from 'lucide-react';
-import { saveCaseQuotation, deleteCaseQuotation } from '../../lib/api';
+import { saveCaseQuotation, deleteCaseQuotation, fetchCaseExpenses } from '../../lib/api';
 import { uploadLitigatorFile, deleteProjectDocument, MAX_UPLOAD_SIZE_BYTES } from '../../lib/files';
 import { getStoredUser, isSuperAdminOrFinance } from '../../lib/auth';
-import type { CoreDocument, QuotationRecord } from '../../lib/types';
+import type { CoreDocument, QuotationRecord, StageExpenseRecord } from '../../lib/types';
 
 interface QuotationModalProps {
   isOpen: boolean;
@@ -62,6 +64,7 @@ export const QuotationModal: React.FC<QuotationModalProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [incurredExpenses, setIncurredExpenses] = useState<StageExpenseRecord[]>([]);
 
   useEffect(() => {
     if (isOpen) {
@@ -70,8 +73,13 @@ export const QuotationModal: React.FC<QuotationModalProps> = ({
       setNotes(existingQuotation?.notes || '');
       setSelectedFile(null);
       setError(null);
+      if (projectCodeId) {
+        fetchCaseExpenses(projectCodeId).then(setIncurredExpenses).catch(() => {});
+      } else {
+        setIncurredExpenses([]);
+      }
     }
-  }, [isOpen, existingQuotation, existingQuotationAmount, existingQuotationNumber]);
+  }, [isOpen, existingQuotation, existingQuotationAmount, existingQuotationNumber, projectCodeId]);
 
   if (!isOpen) return null;
 
@@ -298,6 +306,29 @@ export const QuotationModal: React.FC<QuotationModalProps> = ({
               }}
             />
           </div>
+
+          {/* Incurred Stage Expenses Visibility (Synced with Finance) */}
+          {incurredExpenses.length > 0 && (
+            <div className="p-3 bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/60 rounded-xl space-y-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                  <Receipt className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span>Matter Incurred Stage Expenses</span>
+                </span>
+                <span className="font-mono font-bold text-amber-900 dark:text-amber-100">
+                  ₹{incurredExpenses.reduce((s, e) => s + e.amount, 0).toLocaleString('en-IN')}
+                </span>
+              </div>
+              <div className="text-[11px] text-amber-800/80 dark:text-amber-400 flex items-center justify-between">
+                <span>
+                  {incurredExpenses.length} expense{incurredExpenses.length === 1 ? '' : 's'} logged (Notary, Travel, Docs)
+                </span>
+                <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                  ₹{incurredExpenses.filter((e) => e.billable).reduce((s, e) => s + e.amount, 0).toLocaleString('en-IN')} billable to client
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Section 2: Financial Details */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">

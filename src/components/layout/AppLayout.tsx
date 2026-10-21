@@ -19,6 +19,7 @@ import {
   LogOut,
   RefreshCw,
   Users,
+  Send,
 } from 'lucide-react';
 import {
   getStoredUser,
@@ -117,6 +118,7 @@ export const AppLayout: React.FC = () => {
     { label: 'Today Docket', path: '/', icon: Home },
     { label: 'Court Calendar', path: '/calendar', icon: CalendarIcon },
     { label: 'Court Cases', path: '/cases', icon: Scale },
+    { label: 'Legal Notices', path: '/notices', icon: Send },
     { label: 'Agreements', path: '/agreements', icon: FileText },
     { label: 'Renewals Docket', path: '/renewals', icon: RefreshCw },
     { label: 'Template Library', path: '/templates', icon: FileBox },
