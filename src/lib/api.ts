@@ -834,6 +834,22 @@ export async function createCase(params: CreateCaseParams): Promise<{ id: string
   if (error) throw error;
   const caseId = data as string;
 
+  if (params.filingDate) {
+    try {
+      const created = await fetchCaseById(caseId);
+      if (created?.project_code_id) {
+        const expectedDate = new Date(params.filingDate).toISOString();
+        await coreDb
+          .from('matter_events')
+          .update({ occurred_at: expectedDate })
+          .eq('project_code_id', created.project_code_id)
+          .eq('event_code', 'SUIT_FILED');
+      }
+    } catch (e) {
+      console.warn('Could not sync filing date event on createCase:', e);
+    }
+  }
+
   if (resolvedNewClientName) {
     await syncClientToIpLedger(resolvedNewClientName);
   }
@@ -866,6 +882,45 @@ export async function updateCase(
     .update(updates)
     .eq('id', caseId);
   if (error) throw error;
+
+  if (updates.filing_date) {
+    try {
+      const theCase = await fetchCaseById(caseId);
+      if (theCase?.project_code_id) {
+        const expectedDate = new Date(updates.filing_date).toISOString();
+        const { data: existingEvents } = await coreDb
+          .from('matter_events')
+          .select('id')
+          .eq('project_code_id', theCase.project_code_id)
+          .eq('event_code', 'SUIT_FILED');
+
+        if (existingEvents && existingEvents.length > 0) {
+          await coreDb
+            .from('matter_events')
+            .update({ occurred_at: expectedDate })
+            .eq('project_code_id', theCase.project_code_id)
+            .eq('event_code', 'SUIT_FILED');
+        } else {
+          await coreDb
+            .from('matter_events')
+            .insert({
+              project_code_id: theCase.project_code_id,
+              event_code: 'SUIT_FILED',
+              title: `Court case filed: ${theCase.cause_title || 'Case'}`,
+              detail: `Filed before ${theCase.court || 'Court'}${theCase.bench ? ` (${theCase.bench})` : ''}${theCase.case_number ? `. Case No: ${theCase.case_number}` : ''}`,
+              occurred_at: expectedDate,
+              source_app: 'LITIGATOR',
+              client_visible: true,
+              client_label: 'Case filed',
+              metadata: {},
+            });
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to sync matter_events occurred_at on updateCase:', e);
+    }
+  }
+
   return fetchCaseById(caseId);
 }
 
