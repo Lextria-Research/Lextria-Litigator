@@ -20,10 +20,14 @@ import {
   Send,
   Download,
   Info,
+  Edit2,
+  Check,
+  X,
 } from 'lucide-react';
 import {
   fetchAgreementById,
   updateAgreementStage,
+  updateProjectCode,
   fetchAgreementVersions,
   addAgreementVersion,
   fetchAgreementParties,
@@ -96,6 +100,10 @@ export const AgreementDetailView: React.FC = () => {
   const [versionUploading, setVersionUploading] = useState(false);
 
   const [addDeadlineOpen, setAddDeadlineOpen] = useState(false);
+  const [editingCode, setEditingCode] = useState(false);
+  const [newCodeVal, setNewCodeVal] = useState('');
+  const [savingCode, setSavingCode] = useState(false);
+  const [codeError, setCodeError] = useState<string | null>(null);
   const [newDeadline, setNewDeadline] = useState({
     title: '',
     due_date: '',
@@ -297,9 +305,68 @@ export const AgreementDetailView: React.FC = () => {
               <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
                 {agreement.agreement_type}
               </span>
-              <span className="font-mono text-xs text-slate-400">
-                {agreement.project_code?.code}
-              </span>
+              {editingCode ? (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!newCodeVal.trim()) return;
+                    setSavingCode(true);
+                    setCodeError(null);
+                    try {
+                      await updateProjectCode(agreement.project_code_id, newCodeVal.trim().toUpperCase());
+                      setEditingCode(false);
+                      loadData();
+                    } catch (err: any) {
+                      setCodeError(err.message || 'Failed to update code');
+                    } finally {
+                      setSavingCode(false);
+                    }
+                  }}
+                  className="flex items-center gap-1.5"
+                >
+                  <input
+                    type="text"
+                    autoFocus
+                    value={newCodeVal}
+                    onChange={(e) => setNewCodeVal(e.target.value.toUpperCase())}
+                    className="px-2 py-0.5 text-xs font-mono font-bold bg-white dark:bg-slate-800 border border-indigo-400 rounded focus:ring-1 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
+                    placeholder="e.g. AG174"
+                  />
+                  <button
+                    type="submit"
+                    disabled={savingCode}
+                    className="p-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 text-xs"
+                    title="Save code"
+                  >
+                    <Check className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingCode(false);
+                      setCodeError(null);
+                    }}
+                    className="p-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs"
+                    title="Cancel"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                  {codeError && <span className="text-[10px] text-rose-500 font-normal">{codeError}</span>}
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewCodeVal(agreement.project_code?.code || '');
+                    setEditingCode(true);
+                  }}
+                  title="Click to edit agreement code"
+                  className="font-mono text-xs text-slate-600 dark:text-slate-300 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-slate-700 px-2 py-0.5 rounded transition flex items-center gap-1 cursor-pointer border border-slate-200 dark:border-slate-700"
+                >
+                  <span>{agreement.project_code?.code || '—'}</span>
+                  <Edit2 className="w-2.5 h-2.5 text-indigo-500 opacity-70" />
+                </button>
+              )}
             </div>
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1">
               {agreement.title}

@@ -873,10 +873,125 @@ export async function createCase(params: CreateCaseParams): Promise<{ id: string
   return { id: caseId };
 }
 
+export async function updateProjectCode(
+  projectCodeId: string,
+  newCode: string
+): Promise<void> {
+  const cleanCode = newCode.trim().toUpperCase();
+  if (!cleanCode) throw new Error('Code cannot be empty.');
+
+  // Check collision with another project code
+  const { data: existing, error: checkErr } = await coreDb
+    .from('project_codes')
+    .select('id, code')
+    .eq('code_normalized', cleanCode)
+    .neq('id', projectCodeId)
+    .maybeSingle();
+
+  if (checkErr) throw checkErr;
+  if (existing) {
+    throw new Error(`Matter code "${cleanCode}" is already assigned to another matter.`);
+  }
+
+  const { error: updateErr } = await coreDb
+    .from('project_codes')
+    .update({
+      code: cleanCode,
+      code_normalized: cleanCode,
+    })
+    .eq('id', projectCodeId);
+
+  if (updateErr) throw updateErr;
+}
+
 export async function updateCase(
   caseId: string,
-  updates: Partial<CaseRecord>
+  updates: Partial<CaseRecord>,
+  newProjectCode?: string
 ): Promise<CaseRecord> {
+  // If a new project code was provided, validate and update core.project_codes
+  if (newProjectCode !== undefined) {
+    const cleanCode = newProjectCode.trim().toUpperCase();
+    if (!cleanCode) throw new Error('Matter code cannot be empty.');
+
+    const currentCase = await fetchCaseById(caseId);
+    if (currentCase?.project_code_id) {
+      const currentCode = currentCase.project_code?.code?.trim().toUpperCase();
+      if (cleanCode !== currentCode) {
+        // Check collision
+        const { data: existing, error: checkErr } = await coreDb
+          .from('project_codes')
+          .select('id, code')
+          .eq('code_normalized', cleanCode)
+          .neq('id', currentCase.project_code_id)
+          .maybeSingle();
+
+        if (checkErr) throw checkErr;
+        if (existing) {
+          throw new Error(`Matter code "${cleanCode}" is already in use by another matter.`);
+        }
+
+        const { error: pcErr } = await coreDb
+          .from('project_codes')
+          .update({
+            code: cleanCode,
+            code_normalized: cleanCode,
+            title: updates.cause_title || currentCase.cause_title,
+          })
+          .eq('id', currentCase.project_code_id);
+
+        if (pcErr) throw pcErr;
+
+        // Sync quotation quote_number if default format Q-<oldCode> was used
+        if (currentCode) {
+          try {
+            await supabase
+              .schema('finance')
+              .from('quotations')
+              .update({ quote_number: `Q-${cleanCode}` })
+              .eq('project_code_id', currentCase.project_code_id)
+              .eq('quote_number', `Q-${currentCode}`);
+          } catch (qErr) {
+            console.warn('Could not sync quotation number on code update:', qErr);
+          }
+        }
+      } else if (updates.cause_title && updates.cause_title !== currentCase.cause_title) {
+        await coreDb
+          .from('project_codes')
+          .update({ title: updates.cause_title })
+          .eq('id', currentCase.project_code_id);
+      }
+    } else {
+      // Case has no project_code_id yet -> create one and link it
+      const { data: existing } = await coreDb
+        .from('project_codes')
+        .select('id, code')
+        .eq('code_normalized', cleanCode)
+        .maybeSingle();
+
+      if (existing) {
+        throw new Error(`Matter code "${cleanCode}" is already in use by another matter.`);
+      }
+
+      const { data: newPc, error: createPcErr } = await coreDb
+        .from('project_codes')
+        .insert({
+          code: cleanCode,
+          code_normalized: cleanCode,
+          department: 'LITIGATION',
+          client_id: currentCase?.project_code?.client_id || null,
+          title: updates.cause_title || currentCase?.cause_title || 'Litigation Matter',
+          status: 'ACTIVE',
+          owning_app: 'LITIGATOR',
+        })
+        .select('id')
+        .single();
+
+      if (createPcErr) throw createPcErr;
+      updates.project_code_id = newPc.id;
+    }
+  }
+
   const { error } = await litigatorDb
     .from('cases')
     .update(updates)

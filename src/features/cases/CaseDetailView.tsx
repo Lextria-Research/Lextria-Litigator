@@ -687,9 +687,19 @@ export const CaseDetailView: React.FC = () => {
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <span className="font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded">
-                {theCase.project_code?.code}
-              </span>
+              <button
+                type="button"
+                onClick={() => canEdit && setEditCaseOpen(true)}
+                title={canEdit ? 'Click to edit case code & details' : undefined}
+                className={`font-mono text-xs font-bold px-2 py-0.5 rounded transition flex items-center gap-1.5 ${
+                  canEdit
+                    ? 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 cursor-pointer shadow-2xs'
+                    : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300'
+                }`}
+              >
+                <span>{theCase.project_code?.code || '—'}</span>
+                {canEdit && <Edit2 className="w-2.5 h-2.5 text-indigo-500 opacity-70" />}
+              </button>
               {theCase.case_number && (
                 <span className="font-mono text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
                   {theCase.case_number}

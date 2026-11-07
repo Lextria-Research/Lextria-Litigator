@@ -46,6 +46,7 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
   const canManageQuotation = isSuperAdminOrFinance(currentUser);
 
   const [profiles, setProfiles] = useState<CoreProfile[]>([]);
+  const [projectCode, setProjectCode] = useState(theCase.project_code?.code || '');
   const [causeTitle, setCauseTitle] = useState(theCase.cause_title || '');
   const [caseType, setCaseType] = useState<CaseType>(theCase.case_type || 'COMMERCIAL_SUIT');
   const [court, setCourt] = useState(theCase.court || '');
@@ -76,6 +77,7 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       fetchProfiles().then(setProfiles).catch(console.error);
+      setProjectCode(theCase.project_code?.code || '');
       setCauseTitle(theCase.cause_title || '');
       setCaseType(theCase.case_type || 'COMMERCIAL_SUIT');
       setCourt(theCase.court || '');
@@ -100,6 +102,10 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!projectCode.trim()) {
+      setError('Please provide a Case Code / Project Code (e.g. LC60, LIT-2026-001).');
+      return;
+    }
     if (!causeTitle.trim()) {
       setError('Please provide a Cause Title.');
       return;
@@ -113,22 +119,26 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
     setError(null);
 
     try {
-      await updateCase(theCase.id, {
-        cause_title: causeTitle.trim(),
-        case_type: caseType,
-        court: court.trim(),
-        bench: bench.trim() || null,
-        case_number: caseNumber.trim() || null,
-        cnr_number: cnrNumber.trim() || null,
-        filing_date: filingDate.trim() || null,
-        client_role: clientRole,
-        current_stage: currentStage as any,
-        lead_user_id: leadUserId || null,
-        claim_value: claimValue ? Number(claimValue) : null,
-        court_fee: courtFee ? Number(courtFee) : null,
-        next_hearing_date: nextHearingDate || null,
-        next_purpose: nextPurpose.trim() || null,
-      });
+      await updateCase(
+        theCase.id,
+        {
+          cause_title: causeTitle.trim(),
+          case_type: caseType,
+          court: court.trim(),
+          bench: bench.trim() || null,
+          case_number: caseNumber.trim() || null,
+          cnr_number: cnrNumber.trim() || null,
+          filing_date: filingDate.trim() || null,
+          client_role: clientRole,
+          current_stage: currentStage as any,
+          lead_user_id: leadUserId || null,
+          claim_value: claimValue ? Number(claimValue) : null,
+          court_fee: courtFee ? Number(courtFee) : null,
+          next_hearing_date: nextHearingDate || null,
+          next_purpose: nextPurpose.trim() || null,
+        },
+        projectCode.trim().toUpperCase()
+      );
 
       if (canManageQuotation && theCase.project_code_id) {
         if (quotationFile) {
@@ -179,14 +189,14 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded">
-                {theCase.project_code?.code || 'CASE'}
+                {projectCode || theCase.project_code?.code || 'CASE'}
               </span>
               <h3 className="font-bold text-base text-slate-900 dark:text-slate-100">
                 Edit Case Information &amp; Details
               </h3>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Modify court particulars, filing date, stage, claim value, or case metadata
+              Modify matter code, court particulars, filing date, stage, claim value, or case metadata
             </p>
           </div>
           <button
@@ -211,6 +221,37 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
             <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
               <Scale className="w-3.5 h-3.5 text-indigo-600" />
               <span>Matter Particulars</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Case Code / Project Code <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={projectCode}
+                  onChange={(e) => setProjectCode(e.target.value.toUpperCase())}
+                  placeholder="e.g. LC60, LC60 (A), LIT-2026-9481"
+                  className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 font-mono font-bold"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Master identifier linked across Court Docket, Finance, and Counsel Nexus
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Client Portfolio
+                </label>
+                <div className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 font-medium truncate">
+                  {theCase.project_code?.client?.client_name || 'Unassigned'} ({theCase.project_code?.client?.client_code || '—'})
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Associated client account
+                </p>
+              </div>
             </div>
 
             <div>

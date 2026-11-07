@@ -11,6 +11,7 @@ import {
   Calendar,
   ChevronRight,
   Shield,
+  Edit2,
 } from 'lucide-react';
 import { fetchCases, fetchClients, fetchProfiles } from '../../lib/api';
 import { clock } from '../../lib/clock';
@@ -18,6 +19,7 @@ import { formatINRShort } from '../../lib/currency';
 import { getStoredUser, isSuperAdminOrFinance, canEditCaseData } from '../../lib/auth';
 import { CASE_STAGES, CaseRecord, CoreClient, CoreProfile, getAllCaseStages } from '../../lib/types';
 import { NewCaseModal } from './NewCaseModal';
+import { EditCaseModal } from './EditCaseModal';
 import { ClientSearchSelect } from '../../components/common/ClientSearchSelect';
 
 export const CasesListView: React.FC = () => {
@@ -41,6 +43,7 @@ export const CasesListView: React.FC = () => {
   const [hearingDateEnd, setHearingDateEnd] = useState('');
 
   const [newCaseOpen, setNewCaseOpen] = useState(false);
+  const [editingCase, setEditingCase] = useState<CaseRecord | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -298,8 +301,21 @@ export const CasesListView: React.FC = () => {
                   >
                     {/* Code & CNR */}
                     <td className="py-3.5 px-4">
-                      <div className="font-bold text-slate-900 dark:text-slate-100 font-mono">
-                        {c.project_code?.code || '—'}
+                      <div className="font-bold text-slate-900 dark:text-slate-100 font-mono flex items-center gap-1.5">
+                        <span>{c.project_code?.code || '—'}</span>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingCase(c);
+                            }}
+                            title="Edit Case Code & Details"
+                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-slate-400 hover:text-indigo-600 transition"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                        )}
                       </div>
                       {c.case_number && (
                         <div className="text-[11px] text-slate-500 font-mono">{c.case_number}</div>
@@ -405,8 +421,27 @@ export const CasesListView: React.FC = () => {
                     )}
 
                     {/* Action */}
-                    <td className="py-3.5 px-4 text-right">
-                      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-600 transition inline-block" />
+                    <td className="py-3.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-1">
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingCase(c)}
+                            title="Edit Case Details & Code"
+                            className="p-1 rounded-md text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-slate-800 transition"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/cases/${c.id}`)}
+                          title="Open Docket"
+                          className="p-1 rounded-md text-slate-300 hover:text-slate-600 dark:hover:text-slate-200 transition"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -425,6 +460,19 @@ export const CasesListView: React.FC = () => {
           navigate(`/cases/${caseId}`);
         }}
       />
+
+      {/* Edit Case Modal */}
+      {editingCase && (
+        <EditCaseModal
+          isOpen={Boolean(editingCase)}
+          onClose={() => setEditingCase(null)}
+          onSuccess={() => {
+            setEditingCase(null);
+            loadData();
+          }}
+          theCase={editingCase}
+        />
+      )}
     </div>
   );
 };
