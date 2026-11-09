@@ -228,8 +228,157 @@ function apiUsersDevPlugin(): Plugin {
   };
 }
 
+function apiProjectCodesDevPlugin(): Plugin {
+  return {
+    name: 'api-project-codes-dev-plugin',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        if (!req.url?.startsWith('/api/project-codes')) {
+          return next();
+        }
+
+        const env = loadEnv('development', process.cwd(), ['SUPABASE_', 'VITE_']);
+        const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || 'https://eafciegebhuhoneypsqy.supabase.co';
+        const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+        if (!serviceRoleKey) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          return res.end(JSON.stringify({ error: 'SUPABASE_SERVICE_ROLE_KEY is not configured.' }));
+        }
+
+        const supabase = createClient(supabaseUrl, serviceRoleKey);
+        res.setHeader('Content-Type', 'application/json');
+
+        const getBody = () =>
+          new Promise<any>((resolve) => {
+            let data = '';
+            req.on('data', (chunk) => {
+              data += chunk;
+            });
+            req.on('end', () => {
+              try {
+                resolve(data ? JSON.parse(data) : {});
+              } catch {
+                resolve({});
+              }
+            });
+          });
+
+        if (req.method === 'POST' || req.method === 'PATCH') {
+          try {
+            const body = await getBody();
+            const { projectCodeId, newCode, title } = body;
+
+            if (!projectCodeId || typeof projectCodeId !== 'string') {
+              res.statusCode = 400;
+              return res.end(JSON.stringify({ error: 'Missing or invalid projectCodeId.' }));
+            }
+
+            const cleanCode = (newCode || '').trim().toUpperCase();
+            if (!cleanCode) {
+              res.statusCode = 400;
+              return res.end(JSON.stringify({ error: 'Matter code cannot be empty.' }));
+            }
+
+            const normClean = cleanCode.replace(/\s+/g, '');
+
+            const { data: currentPc, error: currentErr } = await supabase
+              .schema('core')
+              .from('project_codes')
+              .select('id, code, title')
+              .eq('id', projectCodeId)
+              .maybeSingle();
+
+            if (currentErr) throw currentErr;
+            if (!currentPc) {
+              res.statusCode = 404;
+              return res.end(JSON.stringify({ error: 'Project code record not found.' }));
+            }
+
+            const currentCode = currentPc.code?.trim().toUpperCase();
+
+            if (cleanCode !== currentCode) {
+              const { data: existing, error: checkErr } = await supabase
+                .schema('core')
+                .from('project_codes')
+                .select('id, code')
+                .eq('code_normalized', normClean)
+                .neq('id', projectCodeId)
+                .maybeSingle();
+
+              if (checkErr) throw checkErr;
+              if (existing) {
+                res.statusCode = 400;
+                return res.end(
+                  JSON.stringify({
+                    error: `Matter code "${cleanCode}" is already in use by another matter.`,
+                  })
+                );
+              }
+
+              const updatePayload: Record<string, any> = { code: cleanCode };
+              if (title !== undefined) updatePayload.title = title;
+
+              const { data: updatedPc, error: updateErr } = await supabase
+                .schema('core')
+                .from('project_codes')
+                .update(updatePayload)
+                .eq('id', projectCodeId)
+                .select('*')
+                .single();
+
+              if (updateErr) throw updateErr;
+
+              if (currentCode) {
+                try {
+                  await supabase
+                    .schema('finance')
+                    .from('quotations')
+                    .update({ quote_number: `Q-${cleanCode}` })
+                    .eq('project_code_id', projectCodeId)
+                    .eq('quote_number', `Q-${currentCode}`);
+                } catch (qErr) {
+                  console.warn('Could not sync quotation number on code update:', qErr);
+                }
+              }
+
+              res.statusCode = 200;
+              return res.end(JSON.stringify({ success: true, projectCode: updatedPc }));
+            } else {
+              if (title !== undefined && title !== currentPc.title) {
+                const { data: updatedPc, error: updateErr } = await supabase
+                  .schema('core')
+                  .from('project_codes')
+                  .update({ title })
+                  .eq('id', projectCodeId)
+                  .select('*')
+                  .single();
+
+                if (updateErr) throw updateErr;
+                res.statusCode = 200;
+                return res.end(JSON.stringify({ success: true, projectCode: updatedPc }));
+              }
+
+              res.statusCode = 200;
+              return res.end(JSON.stringify({ success: true, projectCode: currentPc }));
+            }
+          } catch (err: any) {
+            console.error('Dev API project-codes error:', err);
+            res.statusCode = 500;
+            return res.end(JSON.stringify({ error: err.message || 'Server error' }));
+          }
+        }
+
+        res.statusCode = 405;
+        return res.end(JSON.stringify({ error: 'Method not allowed' }));
+      });
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss(), apiUsersDevPlugin()],
+  plugins: [react(), tailwindcss(), apiUsersDevPlugin(), apiProjectCodesDevPlugin()],
   envPrefix: ['VITE_', 'SUPABASE_', 'DATA_MODE', 'AUTH_MODE'],
 });

@@ -873,15 +873,51 @@ export async function createCase(params: CreateCaseParams): Promise<{ id: string
   return { id: caseId };
 }
 
-export async function updateProjectCode(
+export async function syncProjectCodeUpdate(
   projectCodeId: string,
-  newCode: string
+  newCode: string,
+  title?: string
 ): Promise<void> {
   const cleanCode = newCode.trim().toUpperCase();
-  if (!cleanCode) throw new Error('Code cannot be empty.');
+  if (!cleanCode) throw new Error('Matter code cannot be empty.');
   const normClean = cleanCode.replace(/\s+/g, '');
 
-  // Check collision with another project code
+  // 1. Try serverless API endpoint (uses service-role client to ensure staff / associates are not blocked by core RLS)
+  try {
+    const res = await fetch('/api/project-codes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-lextria-app': 'LITIGATOR',
+      },
+      body: JSON.stringify({
+        projectCodeId,
+        newCode: cleanCode,
+        title,
+      }),
+    });
+
+    if (res.ok) {
+      return;
+    }
+
+    const errJson = await res.json().catch(() => null);
+    if (errJson?.error) {
+      throw new Error(errJson.error);
+    }
+  } catch (apiErr: any) {
+    if (
+      apiErr.message &&
+      !apiErr.message.includes('Failed to fetch') &&
+      !apiErr.message.includes('NetworkError') &&
+      !apiErr.message.includes('404')
+    ) {
+      throw apiErr;
+    }
+    // Fallback to direct database query if serverless endpoint is unreachable
+  }
+
+  // 2. Direct database query fallback
   const { data: existing, error: checkErr } = await coreDb
     .from('project_codes')
     .select('id, code')
@@ -894,15 +930,28 @@ export async function updateProjectCode(
     throw new Error(`Matter code "${cleanCode}" is already assigned to another matter.`);
   }
 
-  // Note: code_normalized is generated always by PostgreSQL, do not include it in update
-  const { error: updateErr } = await coreDb
+  const updatePayload: Record<string, any> = { code: cleanCode };
+  if (title !== undefined) updatePayload.title = title;
+
+  const { data: updatedRows, error: updateErr } = await coreDb
     .from('project_codes')
-    .update({
-      code: cleanCode,
-    })
-    .eq('id', projectCodeId);
+    .update(updatePayload)
+    .eq('id', projectCodeId)
+    .select('id');
 
   if (updateErr) throw updateErr;
+  if (!updatedRows || updatedRows.length === 0) {
+    throw new Error(
+      `Permission denied by database security policy to update matter code "${cleanCode}". Only Super Admin or Department Admin can update matter codes directly.`
+    );
+  }
+}
+
+export async function updateProjectCode(
+  projectCodeId: string,
+  newCode: string
+): Promise<void> {
+  return syncProjectCodeUpdate(projectCodeId, newCode);
 }
 
 export async function updateCase(
@@ -919,49 +968,12 @@ export async function updateCase(
     const currentCase = await fetchCaseById(caseId);
     if (currentCase?.project_code_id) {
       const currentCode = currentCase.project_code?.code?.trim().toUpperCase();
-      if (cleanCode !== currentCode) {
-        // Check collision
-        const { data: existing, error: checkErr } = await coreDb
-          .from('project_codes')
-          .select('id, code')
-          .eq('code_normalized', normClean)
-          .neq('id', currentCase.project_code_id)
-          .maybeSingle();
-
-        if (checkErr) throw checkErr;
-        if (existing) {
-          throw new Error(`Matter code "${cleanCode}" is already in use by another matter.`);
-        }
-
-        // Note: code_normalized is generated always by PostgreSQL, do not include it in update
-        const { error: pcErr } = await coreDb
-          .from('project_codes')
-          .update({
-            code: cleanCode,
-            title: updates.cause_title || currentCase.cause_title,
-          })
-          .eq('id', currentCase.project_code_id);
-
-        if (pcErr) throw pcErr;
-
-        // Sync quotation quote_number if default format Q-<oldCode> was used
-        if (currentCode) {
-          try {
-            await supabase
-              .schema('finance')
-              .from('quotations')
-              .update({ quote_number: `Q-${cleanCode}` })
-              .eq('project_code_id', currentCase.project_code_id)
-              .eq('quote_number', `Q-${currentCode}`);
-          } catch (qErr) {
-            console.warn('Could not sync quotation number on code update:', qErr);
-          }
-        }
-      } else if (updates.cause_title && updates.cause_title !== currentCase.cause_title) {
-        await coreDb
-          .from('project_codes')
-          .update({ title: updates.cause_title })
-          .eq('id', currentCase.project_code_id);
+      if (cleanCode !== currentCode || (updates.cause_title && updates.cause_title !== currentCase.cause_title)) {
+        await syncProjectCodeUpdate(
+          currentCase.project_code_id,
+          cleanCode,
+          updates.cause_title || currentCase.cause_title
+        );
       }
     } else {
       // Case has no project_code_id yet -> create one and link it
