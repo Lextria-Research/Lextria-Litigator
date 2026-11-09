@@ -879,12 +879,13 @@ export async function updateProjectCode(
 ): Promise<void> {
   const cleanCode = newCode.trim().toUpperCase();
   if (!cleanCode) throw new Error('Code cannot be empty.');
+  const normClean = cleanCode.replace(/\s+/g, '');
 
   // Check collision with another project code
   const { data: existing, error: checkErr } = await coreDb
     .from('project_codes')
     .select('id, code')
-    .eq('code_normalized', cleanCode)
+    .eq('code_normalized', normClean)
     .neq('id', projectCodeId)
     .maybeSingle();
 
@@ -893,11 +894,11 @@ export async function updateProjectCode(
     throw new Error(`Matter code "${cleanCode}" is already assigned to another matter.`);
   }
 
+  // Note: code_normalized is generated always by PostgreSQL, do not include it in update
   const { error: updateErr } = await coreDb
     .from('project_codes')
     .update({
       code: cleanCode,
-      code_normalized: cleanCode,
     })
     .eq('id', projectCodeId);
 
@@ -913,6 +914,7 @@ export async function updateCase(
   if (newProjectCode !== undefined) {
     const cleanCode = newProjectCode.trim().toUpperCase();
     if (!cleanCode) throw new Error('Matter code cannot be empty.');
+    const normClean = cleanCode.replace(/\s+/g, '');
 
     const currentCase = await fetchCaseById(caseId);
     if (currentCase?.project_code_id) {
@@ -922,7 +924,7 @@ export async function updateCase(
         const { data: existing, error: checkErr } = await coreDb
           .from('project_codes')
           .select('id, code')
-          .eq('code_normalized', cleanCode)
+          .eq('code_normalized', normClean)
           .neq('id', currentCase.project_code_id)
           .maybeSingle();
 
@@ -931,11 +933,11 @@ export async function updateCase(
           throw new Error(`Matter code "${cleanCode}" is already in use by another matter.`);
         }
 
+        // Note: code_normalized is generated always by PostgreSQL, do not include it in update
         const { error: pcErr } = await coreDb
           .from('project_codes')
           .update({
             code: cleanCode,
-            code_normalized: cleanCode,
             title: updates.cause_title || currentCase.cause_title,
           })
           .eq('id', currentCase.project_code_id);
@@ -966,18 +968,18 @@ export async function updateCase(
       const { data: existing } = await coreDb
         .from('project_codes')
         .select('id, code')
-        .eq('code_normalized', cleanCode)
+        .eq('code_normalized', normClean)
         .maybeSingle();
 
       if (existing) {
         throw new Error(`Matter code "${cleanCode}" is already in use by another matter.`);
       }
 
+      // Note: code_normalized is generated always by PostgreSQL, do not include it in insert
       const { data: newPc, error: createPcErr } = await coreDb
         .from('project_codes')
         .insert({
           code: cleanCode,
-          code_normalized: cleanCode,
           department: 'LITIGATION',
           client_id: currentCase?.project_code?.client_id || null,
           title: updates.cause_title || currentCase?.cause_title || 'Litigation Matter',
