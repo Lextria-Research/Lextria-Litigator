@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Check, AlertCircle, Trash2, History } from 'lucide-react';
 import { createCustomMilestone, updateMatterEvent, deleteMatterEvent } from '../../lib/api';
 import { clock } from '../../lib/clock';
+import { getStoredUser } from '../../lib/auth';
 
 interface AddMilestoneModalProps {
   isOpen: boolean;
@@ -35,7 +36,8 @@ export const AddMilestoneModal: React.FC<AddMilestoneModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setDate(existingMilestone?.date || clock.todayYMD());
+      const rawDate = existingMilestone?.date || clock.todayYMD();
+      setDate(rawDate.slice(0, 10));
       setTitle(existingMilestone?.title || '');
       setDetail(existingMilestone?.detail || '');
       setCategory(existingMilestone?.category || 'PROGRESS');
@@ -52,6 +54,11 @@ export const AddMilestoneModal: React.FC<AddMilestoneModalProps> = ({
       return;
     }
 
+    if (!existingMilestone && !projectCodeId) {
+      setError('Cannot add milestone: Case has no project code ID.');
+      return;
+    }
+
     setSaving(true);
     setError(null);
 
@@ -64,12 +71,14 @@ export const AddMilestoneModal: React.FC<AddMilestoneModalProps> = ({
           eventCode: category,
         });
       } else {
+        const currentUser = getStoredUser();
         await createCustomMilestone({
           projectCodeId,
           title: title.trim(),
           detail: detail.trim() || undefined,
           occurredAt: date,
           category,
+          actorUserId: currentUser?.id,
         });
       }
 

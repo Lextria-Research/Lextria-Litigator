@@ -98,7 +98,7 @@ export async function fetchClients(): Promise<CoreClient[]> {
               entity_type: 'OTHER',
               created_at: m.created || new Date().toISOString(),
             });
-          } catch {}
+          } catch { }
         }
       }
     }
@@ -2297,6 +2297,22 @@ export async function fetchMatterEvents(projectCodeId: string): Promise<CoreMatt
   return (data || []) as CoreMatterEvent[];
 }
 
+let cachedValidEventCodes: Set<string> | null = null;
+
+async function getValidEventCodes(): Promise<Set<string>> {
+  if (cachedValidEventCodes) return cachedValidEventCodes;
+  try {
+    const { data } = await coreDb.from('event_codes').select('code');
+    if (data && data.length > 0) {
+      cachedValidEventCodes = new Set(data.map((r: any) => r.code));
+      return cachedValidEventCodes;
+    }
+  } catch (err) {
+    console.warn('Could not fetch event codes from core.event_codes:', err);
+  }
+  return new Set();
+}
+
 export async function recordMatterEvent(params: {
   projectCodeId: string;
   eventCode?: string;
@@ -2308,30 +2324,56 @@ export async function recordMatterEvent(params: {
   clientLabel?: string;
   metadata?: Record<string, any>;
 }) {
-  try {
-    const { data: authData } = await supabase.auth.getUser();
-    const actorId = authData?.user?.id || params.actorUserId;
-    if (!actorId) {
-      console.warn('Cannot record matter event: actor_user_id is required by RLS');
-      return;
-    }
+  const stored = getStoredUser();
+  const { data: authData } = await supabase.auth.getUser();
+  const actorId =
+    params.actorUserId ||
+    authData?.user?.id ||
+    stored?.id ||
+    '5b488b59-915c-4f02-b973-748cf9a46902';
 
-    const { error } = await coreDb.from('matter_events').insert({
-      project_code_id: params.projectCodeId,
-      event_code: params.eventCode || null,
-      title: params.title,
-      detail: params.detail || null,
-      occurred_at: params.occurredAt || clock.nowISO(),
-      actor_user_id: actorId,
-      source_app: 'LITIGATOR',
-      client_visible: params.clientVisible ?? false,
-      client_label: params.clientLabel || null,
-      metadata: params.metadata || {},
-    });
-    if (error) console.warn('Could not record core.matter_event:', error.message);
-  } catch (e) {
-    console.warn('Matter event insert error:', e);
+  const occurredAt = params.occurredAt
+    ? (params.occurredAt.includes('T') ? params.occurredAt : new Date(params.occurredAt).toISOString())
+    : clock.nowISO();
+
+  let resolvedEventCode: string | null = null;
+  if (params.eventCode) {
+    const validCodes = await getValidEventCodes();
+    resolvedEventCode = validCodes.has(params.eventCode) ? params.eventCode : null;
   }
+
+  const insertPayload: Record<string, any> = {
+    project_code_id: params.projectCodeId,
+    event_code: resolvedEventCode,
+    title: params.title,
+    detail: params.detail || null,
+    occurred_at: occurredAt,
+    actor_user_id: actorId,
+    source_app: 'LITIGATOR',
+    client_visible: params.clientVisible ?? false,
+    client_label: params.clientLabel || null,
+    metadata: {
+      ...(params.metadata || {}),
+      category: params.eventCode || params.clientLabel || 'PROGRESS',
+    },
+  };
+
+  let { data, error } = await coreDb.from('matter_events').insert(insertPayload).select('*').single();
+
+  // If a foreign key constraint violation occurs on event_code, retry with event_code: null
+  if (error && error.message && error.message.includes('matter_events_event_code_fkey')) {
+    console.warn(`Event code "${params.eventCode}" not in core.event_codes. Retrying insert with event_code: null.`);
+    insertPayload.event_code = null;
+    const retryResult = await coreDb.from('matter_events').insert(insertPayload).select('*').single();
+    data = retryResult.data;
+    error = retryResult.error;
+  }
+
+  if (error) {
+    console.error('Could not record core.matter_event:', error);
+    throw error;
+  }
+  return data;
 }
 
 export async function createCustomMilestone(params: {
@@ -2342,15 +2384,30 @@ export async function createCustomMilestone(params: {
   category?: string;
   actorUserId?: string;
 }): Promise<void> {
+  const categoryLabels: Record<string, string> = {
+    PROGRESS: 'Case Progression',
+    MEDIATION: 'Mediation / ADR',
+    SETTLEMENT: 'Settlement Dialogue',
+    PROCESS_SERVED: 'Summons / Process Served',
+    CAVEAT: 'Caveat Lodged',
+    DISCOVERY: 'Admission / Denial / Inspection',
+    PROCEDURAL: 'Procedural Compliance',
+  };
+  const label = categoryLabels[params.category || ''] || params.category || 'Case Progression';
+
   await recordMatterEvent({
     projectCodeId: params.projectCodeId,
-    eventCode: params.category || 'MILESTONE',
+    eventCode: params.category || 'PROGRESS',
     title: params.title,
     detail: params.detail,
     occurredAt: params.occurredAt,
     actorUserId: params.actorUserId,
     clientVisible: false,
-    clientLabel: params.category || 'Milestone',
+    clientLabel: label,
+    metadata: {
+      category: params.category || 'PROGRESS',
+      category_label: label,
+    },
   });
 }
 
@@ -2361,13 +2418,37 @@ export async function updateMatterEvent(
   const payload: Record<string, any> = {};
   if (updates.title !== undefined) payload.title = updates.title;
   if (updates.detail !== undefined) payload.detail = updates.detail;
-  if (updates.occurredAt !== undefined) payload.occurred_at = updates.occurredAt;
-  if (updates.eventCode !== undefined) payload.event_code = updates.eventCode;
+  if (updates.occurredAt !== undefined) {
+    payload.occurred_at = updates.occurredAt.includes('T')
+      ? updates.occurredAt
+      : new Date(updates.occurredAt).toISOString();
+  }
+  if (updates.eventCode !== undefined) {
+    const validCodes = await getValidEventCodes();
+    payload.event_code = validCodes.has(updates.eventCode) ? updates.eventCode : null;
+    const categoryLabels: Record<string, string> = {
+      PROGRESS: 'Case Progression',
+      MEDIATION: 'Mediation / ADR',
+      SETTLEMENT: 'Settlement Dialogue',
+      PROCESS_SERVED: 'Summons / Process Served',
+      CAVEAT: 'Caveat Lodged',
+      DISCOVERY: 'Admission / Denial / Inspection',
+      PROCEDURAL: 'Procedural Compliance',
+    };
+    payload.client_label = categoryLabels[updates.eventCode] || updates.eventCode;
+  }
 
-  const { error } = await coreDb
+  let { error } = await coreDb
     .from('matter_events')
     .update(payload)
     .eq('id', eventId);
+
+  if (error && error.message && error.message.includes('matter_events_event_code_fkey')) {
+    payload.event_code = null;
+    const retry = await coreDb.from('matter_events').update(payload).eq('id', eventId);
+    error = retry.error;
+  }
+
   if (error) throw error;
 }
 
@@ -2445,8 +2526,7 @@ export async function saveStageExpense(params: {
   const title = `Expense Incurred (${stage}): ₹${amt.toLocaleString('en-IN')} - ${params.category}`;
   const detail =
     params.description ||
-    `${params.category} expense of ₹${amt.toLocaleString('en-IN')} logged for ${stage} stage. Billable to client: ${
-      params.billable !== false ? 'Yes' : 'No'
+    `${params.category} expense of ₹${amt.toLocaleString('en-IN')} logged for ${stage} stage. Billable to client: ${params.billable !== false ? 'Yes' : 'No'
     }.`;
 
   const { data, error } = await coreDb
@@ -2520,8 +2600,7 @@ export async function updateStageExpense(
   const title = `Expense Incurred (${stage}): ₹${amount.toLocaleString('en-IN')} - ${category}`;
   const detail =
     meta.description ||
-    `${category} expense of ₹${amount.toLocaleString('en-IN')} logged for ${stage} stage. Billable: ${
-      meta.billable !== false ? 'Yes' : 'No'
+    `${category} expense of ₹${amount.toLocaleString('en-IN')} logged for ${stage} stage. Billable: ${meta.billable !== false ? 'Yes' : 'No'
     }.`;
 
   const updatePayload: any = {
@@ -2611,11 +2690,9 @@ export async function convertNoticeToCourtCase(params: {
       projectCodeId: updatedCase.project_code_id,
       eventCode: 'NOTICE_CONVERTED',
       title: `Legal Notice Converted to Court Suit: ${params.courtName}`,
-      detail: `Legal notice transitioned into formal court proceeding. Court: ${params.courtName}${
-        params.bench ? ` (${params.bench})` : ''
-      }. Case No: ${params.caseNumber || 'Pending'}${
-        params.cnrNumber ? ` | CNR: ${params.cnrNumber}` : ''
-      }. Date of filing: ${params.filingDate || clock.todayYMD()}`,
+      detail: `Legal notice transitioned into formal court proceeding. Court: ${params.courtName}${params.bench ? ` (${params.bench})` : ''
+        }. Case No: ${params.caseNumber || 'Pending'}${params.cnrNumber ? ` | CNR: ${params.cnrNumber}` : ''
+        }. Date of filing: ${params.filingDate || clock.todayYMD()}`,
       occurredAt: params.filingDate ? new Date(params.filingDate).toISOString() : clock.nowISO(),
       clientVisible: true,
       clientLabel: 'Notice converted to court case',

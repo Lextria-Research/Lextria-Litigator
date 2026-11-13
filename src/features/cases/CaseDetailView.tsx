@@ -336,7 +336,7 @@ export const CaseDetailView: React.FC = () => {
         ev.event_code === 'CASE_CREATED' ||
         ev.event_code === 'ENTRY_CREATED' ||
         ev.event_code === 'SUIT_FILED' ||
-        ev.title?.toLowerCase().includes('created') ||
+        ev.title?.toLowerCase() === 'case created' ||
         ev.title?.toLowerCase().includes('docket created')
       ) {
         return;
@@ -348,7 +348,7 @@ export const CaseDetailView: React.FC = () => {
           title: ev.title,
           detail: ev.detail,
           category: 'MILESTONE',
-          badge: ev.event_code || ev.source_app || 'PROGRESS',
+          badge: ev.client_label || ev.metadata?.category_label || ev.metadata?.category || ev.event_code || ev.source_app || 'PROGRESS',
           badgeColor: 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
           actor: ev.actor_profile?.display_name,
         });
@@ -1084,12 +1084,13 @@ export const CaseDetailView: React.FC = () => {
                               type="button"
                               onClick={() => {
                                 const rawId = ev.id.replace('timeline-', '');
+                                const origEv = timeline.find((t) => t.id === rawId);
                                 setTargetMilestone({
                                   id: rawId,
                                   date: ev.date,
                                   title: ev.title,
                                   detail: ev.detail,
-                                  category: ev.badge,
+                                  category: origEv?.metadata?.category || origEv?.event_code || ev.badge,
                                 });
                                 setMilestoneModalOpen(true);
                               }}
@@ -2455,3 +2456,4 @@ export const CaseDetailView: React.FC = () => {
     </div>
   );
 };
+
