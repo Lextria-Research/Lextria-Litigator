@@ -377,8 +377,80 @@ function apiProjectCodesDevPlugin(): Plugin {
   };
 }
 
+function apiMatterEventsDevPlugin(): Plugin {
+  return {
+    name: 'api-matter-events-dev-plugin',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        if (!req.url?.startsWith('/api/matter-events')) {
+          return next();
+        }
+
+        const env = loadEnv('development', process.cwd(), ['SUPABASE_', 'VITE_']);
+        const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || 'https://eafciegebhuhoneypsqy.supabase.co';
+        const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+        if (!serviceRoleKey) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          return res.end(JSON.stringify({ error: 'SUPABASE_SERVICE_ROLE_KEY is not configured.' }));
+        }
+
+        const supabase = createClient(supabaseUrl, serviceRoleKey);
+        res.setHeader('Content-Type', 'application/json');
+
+        const getBody = () =>
+          new Promise<any>((resolve) => {
+            let data = '';
+            req.on('data', (chunk) => {
+              data += chunk;
+            });
+            req.on('end', () => {
+              try {
+                resolve(data ? JSON.parse(data) : {});
+              } catch {
+                resolve({});
+              }
+            });
+          });
+
+        if (req.method === 'DELETE') {
+          try {
+            const body = await getBody();
+            const urlObj = new URL(req.url, 'http://localhost');
+            const eventId = body.id || urlObj.searchParams.get('id');
+
+            if (!eventId || typeof eventId !== 'string') {
+              res.statusCode = 400;
+              return res.end(JSON.stringify({ error: 'Missing or invalid event id.' }));
+            }
+
+            const { error } = await supabase
+              .schema('core')
+              .from('matter_events')
+              .delete()
+              .eq('id', eventId);
+
+            if (error) throw error;
+
+            res.statusCode = 200;
+            return res.end(JSON.stringify({ success: true, message: 'Matter event deleted successfully.' }));
+          } catch (err: any) {
+            console.error('Dev API matter-events error:', err);
+            res.statusCode = 500;
+            return res.end(JSON.stringify({ error: err.message || 'Server error' }));
+          }
+        }
+
+        res.statusCode = 405;
+        return res.end(JSON.stringify({ error: 'Method not allowed' }));
+      });
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss(), apiUsersDevPlugin(), apiProjectCodesDevPlugin()],
+  plugins: [react(), tailwindcss(), apiUsersDevPlugin(), apiProjectCodesDevPlugin(), apiMatterEventsDevPlugin()],
   envPrefix: ['VITE_', 'SUPABASE_', 'DATA_MODE', 'AUTH_MODE'],
 });

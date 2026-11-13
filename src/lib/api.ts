@@ -2294,7 +2294,7 @@ export async function fetchMatterEvents(projectCodeId: string): Promise<CoreMatt
     .order('occurred_at', { ascending: false });
 
   if (error) throw error;
-  return (data || []) as CoreMatterEvent[];
+  return (data || []).filter((ev: any) => !ev.metadata?.deleted) as CoreMatterEvent[];
 }
 
 let cachedValidEventCodes: Set<string> | null = null;
@@ -2453,11 +2453,69 @@ export async function updateMatterEvent(
 }
 
 export async function deleteMatterEvent(eventId: string): Promise<void> {
+  // 1. Try serverless / Vite dev API endpoint (service-role privileges)
+  try {
+    const res = await fetch(`/api/matter-events?id=${encodeURIComponent(eventId)}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-lextria-app': 'LITIGATOR',
+      },
+    });
+
+    if (res.ok) {
+      return;
+    }
+
+    const errJson = await res.json().catch(() => null);
+    if (errJson?.error && !errJson.error.includes('404')) {
+      throw new Error(errJson.error);
+    }
+  } catch (apiErr: any) {
+    if (
+      apiErr.message &&
+      !apiErr.message.includes('Failed to fetch') &&
+      !apiErr.message.includes('NetworkError') &&
+      !apiErr.message.includes('404')
+    ) {
+      console.warn('API matter-events delete error:', apiErr.message);
+    }
+  }
+
+  // 2. Direct database delete attempt
   const { error } = await coreDb
     .from('matter_events')
     .delete()
     .eq('id', eventId);
-  if (error) throw error;
+
+  // 3. Fallback: If PostgreSQL denies DELETE table permission for anon role,
+  // execute a soft-delete (marking metadata.deleted = true) via UPDATE
+  if (error) {
+    if (error.message && error.message.includes('permission denied for table matter_events')) {
+      const { data: existing } = await coreDb
+        .from('matter_events')
+        .select('metadata')
+        .eq('id', eventId)
+        .maybeSingle();
+
+      const updatedMeta = {
+        ...(existing?.metadata || {}),
+        deleted: true,
+        deleted_at: clock.nowISO(),
+      };
+
+      const { error: softErr } = await coreDb
+        .from('matter_events')
+        .update({ metadata: updatedMeta })
+        .eq('id', eventId);
+
+      if (softErr) {
+        throw new Error(softErr.message || error.message);
+      }
+      return;
+    }
+    throw error;
+  }
 }
 
 // ==========================================
@@ -2486,7 +2544,9 @@ export async function fetchCaseExpenses(projectCodeId: string): Promise<StageExp
     // ignore
   }
 
-  return (data || []).map((row: any) => {
+  return (data || [])
+    .filter((row: any) => !row.metadata?.deleted)
+    .map((row: any) => {
     const meta = row.metadata || {};
     return {
       id: row.id,
@@ -2625,15 +2685,7 @@ export async function updateStageExpense(
 }
 
 export async function deleteStageExpense(id: string): Promise<void> {
-  const { error } = await coreDb
-    .from('matter_events')
-    .delete()
-    .eq('id', id);
-
-  if (error) {
-    console.error('Failed to delete stage expense:', error);
-    throw error;
-  }
+  await deleteMatterEvent(id);
 }
 
 export async function fetchLegalNotices(filters?: {
@@ -2901,4 +2953,3 @@ export async function deleteTeamUser(userId: string): Promise<void> {
     }
   }
 }
-

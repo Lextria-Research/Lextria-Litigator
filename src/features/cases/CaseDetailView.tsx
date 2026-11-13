@@ -333,6 +333,7 @@ export const CaseDetailView: React.FC = () => {
     // 5. Genuine cross-app progress milestones (filter out synthetic case creation / entry events)
     timeline.forEach((ev) => {
       if (
+        ev.metadata?.deleted ||
         ev.event_code === 'CASE_CREATED' ||
         ev.event_code === 'ENTRY_CREATED' ||
         ev.event_code === 'SUIT_FILED' ||
