@@ -80,7 +80,22 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
           setClients(c);
           setProfiles(p);
           if (c.length > 0) setClientId(c[0].id);
-          if (p.length > 0) setLeadUserId(p[0].id);
+          const currentUser = getStoredUser();
+          const currentProfileMatch = p.find(
+            (prof) => prof.id === currentUser?.id || prof.email?.toLowerCase() === currentUser?.email?.toLowerCase()
+          );
+          if (currentProfileMatch) {
+            setLeadUserId(currentProfileMatch.id);
+          } else {
+            const defaultLead = p.find(
+              (prof) => prof.display_name?.toLowerCase().includes('pranav') || prof.display_name?.toLowerCase().includes('kaushal')
+            );
+            if (defaultLead) {
+              setLeadUserId(defaultLead.id);
+            } else if (p.length > 0) {
+              setLeadUserId(p[0].id);
+            }
+          }
         })
         .catch(console.error);
 

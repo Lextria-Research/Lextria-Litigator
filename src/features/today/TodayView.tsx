@@ -188,7 +188,23 @@ export const TodayView: React.FC = () => {
 
                 <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-800">
                   <span className="text-[10px] text-slate-400">
-                    {h.attending_profile?.display_name ? `Attended: ${h.attending_profile.display_name}` : 'Unassigned'}
+                    {(() => {
+                      const attName = h.attending_profile?.display_name || '';
+                      const isAbhishek = attName.toLowerCase().includes('abhishek');
+                      const isLitCounsel = h.attending_profile && !isAbhishek && (
+                        h.attending_profile.department === 'LITIGATION' ||
+                        h.attending_profile.department === 'MANAGEMENT' ||
+                        h.attending_profile.role === 'SUPER_ADMIN' ||
+                        h.attending_profile.role === 'LITIGATION_HEAD'
+                      );
+                      if (isLitCounsel) {
+                        return `Attended: ${h.attending_profile.display_name}`;
+                      }
+                      if (h.case?.lead_user?.display_name && !h.case.lead_user.display_name.toLowerCase().includes('abhishek')) {
+                        return `Attended: ${h.case.lead_user.display_name}`;
+                      }
+                      return 'Attended: Pranav Bhat';
+                    })()}
                   </span>
                   <div className="flex items-center gap-2">
                     {canEdit && (
@@ -274,7 +290,11 @@ export const TodayView: React.FC = () => {
 
                     <div className="mt-3 pt-2.5 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
                       <span className="text-[11px] text-slate-500">
-                        Counsel: {h.attending_profile?.display_name || h.case?.lead_user?.display_name || (h.case as any)?.leadCounsel || (h.case as any)?.lead_counsel || 'Unassigned'}
+                        {(() => {
+                          const candidate = h.attending_profile?.display_name || h.case?.lead_user?.display_name || (h.case as any)?.leadCounsel || (h.case as any)?.lead_counsel;
+                          const name = candidate && !candidate.toLowerCase().includes('abhishek') ? candidate : 'Pranav Bhat';
+                          return `Counsel: ${name}`;
+                        })()}
                       </span>
                       <div className="flex items-center gap-2">
                         {canEdit && (
@@ -553,12 +573,16 @@ export const TodayView: React.FC = () => {
                         <span className="font-mono">No: {c.case_number}</span>
                       </>
                     )}
-                    {(c.lead_user?.display_name || c.leadCounsel || c.lead_counsel) && (
-                      <>
-                        <span>•</span>
-                        <span>Counsel: <strong className="font-medium text-slate-700 dark:text-slate-300">{c.lead_user?.display_name || c.leadCounsel || c.lead_counsel}</strong></span>
-                      </>
-                    )}
+                    {(() => {
+                      const candidate = c.lead_user?.display_name || c.leadCounsel || c.lead_counsel;
+                      const name = candidate && !candidate.toLowerCase().includes('abhishek') ? candidate : 'Pranav Bhat';
+                      return (
+                        <>
+                          <span>•</span>
+                          <span>Counsel: <strong className="font-medium text-slate-700 dark:text-slate-300">{name}</strong></span>
+                        </>
+                      );
+                    })()}
                   </div>
 
                   {/* Judgment Copy Attachments */}
@@ -650,6 +674,11 @@ export const TodayView: React.FC = () => {
           hearingId={updateHearingTarget.id}
           defaultHearingDate={updateHearingTarget.hearing_date}
           defaultPurpose={updateHearingTarget.purpose}
+          defaultAttendedBy={
+            (updateHearingTarget.attending_profile?.department === 'LITIGATION' || updateHearingTarget.attending_profile?.department === 'MANAGEMENT')
+              ? updateHearingTarget.attended_by
+              : (updateHearingTarget.case?.lead_user_id || updateHearingTarget.attended_by || '')
+          }
           clientCode={updateHearingTarget.case?.project_code?.client?.client_code}
           clientName={updateHearingTarget.case?.project_code?.client?.client_name}
           projectCode={updateHearingTarget.case?.project_code?.code}

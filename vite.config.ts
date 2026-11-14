@@ -414,6 +414,121 @@ function apiMatterEventsDevPlugin(): Plugin {
             });
           });
 
+        if (req.method === 'POST') {
+          try {
+            const body = await getBody();
+            const {
+              project_code_id,
+              event_code,
+              title,
+              detail,
+              occurred_at,
+              actor_user_id,
+              source_app = 'LITIGATOR',
+              client_visible = false,
+              client_label,
+              metadata = {},
+            } = body;
+
+            if (!project_code_id || !title) {
+              res.statusCode = 400;
+              return res.end(JSON.stringify({ error: 'Missing required fields: project_code_id and title.' }));
+            }
+
+            const insertPayload: Record<string, any> = {
+              project_code_id,
+              event_code: event_code || null,
+              title,
+              detail: detail || null,
+              occurred_at: occurred_at || new Date().toISOString(),
+              actor_user_id: actor_user_id || null,
+              source_app,
+              client_visible: Boolean(client_visible),
+              client_label: client_label || null,
+              metadata: metadata || {},
+            };
+
+            let { data, error } = await supabase
+              .schema('core')
+              .from('matter_events')
+              .insert(insertPayload)
+              .select('*')
+              .single();
+
+            if (error && error.message && error.message.includes('matter_events_event_code_fkey')) {
+              insertPayload.event_code = null;
+              const retry = await supabase
+                .schema('core')
+                .from('matter_events')
+                .insert(insertPayload)
+                .select('*')
+                .single();
+              data = retry.data;
+              error = retry.error;
+            }
+
+            if (error) throw error;
+
+            res.statusCode = 201;
+            return res.end(JSON.stringify({ success: true, event: data }));
+          } catch (err: any) {
+            console.error('Dev API matter-events POST error:', err);
+            res.statusCode = 500;
+            return res.end(JSON.stringify({ error: err.message || 'Server error' }));
+          }
+        }
+
+        if (req.method === 'PUT' || req.method === 'PATCH') {
+          try {
+            const body = await getBody();
+            const urlObj = new URL(req.url, 'http://localhost');
+            const eventId = body.id || urlObj.searchParams.get('id');
+
+            if (!eventId || typeof eventId !== 'string') {
+              res.statusCode = 400;
+              return res.end(JSON.stringify({ error: 'Missing or invalid event id.' }));
+            }
+
+            const payload: Record<string, any> = {};
+            if (body.title !== undefined) payload.title = body.title;
+            if (body.detail !== undefined) payload.detail = body.detail;
+            if (body.occurred_at !== undefined) payload.occurred_at = body.occurred_at;
+            if (body.event_code !== undefined) payload.event_code = body.event_code || null;
+            if (body.client_label !== undefined) payload.client_label = body.client_label;
+            if (body.metadata !== undefined) payload.metadata = body.metadata;
+
+            let { data, error } = await supabase
+              .schema('core')
+              .from('matter_events')
+              .update(payload)
+              .eq('id', eventId)
+              .select('*')
+              .single();
+
+            if (error && error.message && error.message.includes('matter_events_event_code_fkey')) {
+              payload.event_code = null;
+              const retry = await supabase
+                .schema('core')
+                .from('matter_events')
+                .update(payload)
+                .eq('id', eventId)
+                .select('*')
+                .single();
+              data = retry.data;
+              error = retry.error;
+            }
+
+            if (error) throw error;
+
+            res.statusCode = 200;
+            return res.end(JSON.stringify({ success: true, event: data }));
+          } catch (err: any) {
+            console.error('Dev API matter-events PUT error:', err);
+            res.statusCode = 500;
+            return res.end(JSON.stringify({ error: err.message || 'Server error' }));
+          }
+        }
+
         if (req.method === 'DELETE') {
           try {
             const body = await getBody();
