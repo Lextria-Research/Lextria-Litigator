@@ -337,13 +337,14 @@ export const CaseDetailView: React.FC = () => {
         });
       });
 
-    // 5. Genuine cross-app progress milestones (filter out synthetic case creation / entry events)
+    // 5. Genuine cross-app progress milestones (filter out synthetic case creation / entry events and duplicate hearings)
     timeline.forEach((ev) => {
       if (
         ev.metadata?.deleted ||
         ev.event_code === 'CASE_CREATED' ||
         ev.event_code === 'ENTRY_CREATED' ||
         ev.event_code === 'SUIT_FILED' ||
+        ev.event_code === 'HEARING_ATTENDED' ||
         ev.title?.toLowerCase() === 'case created' ||
         ev.title?.toLowerCase().includes('docket created')
       ) {

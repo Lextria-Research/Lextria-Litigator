@@ -1284,6 +1284,8 @@ export async function updateAfterHearing(params: {
     const { error } = await litigatorDb
       .from('hearings')
       .update({
+        hearing_date: params.hearingDate,
+        purpose: params.purpose,
         outcome: params.outcome,
         next_date: params.nextDate || null,
         next_purpose: params.nextPurpose || null,
@@ -1323,14 +1325,32 @@ export async function updateAfterHearing(params: {
     // ignore
   }
 
-  // 2. If nextDate is provided, create the NEXT hearing row & update case
+  // 2. If nextDate is provided, create or update the NEXT hearing row & update case
   if (params.nextDate) {
-    await litigatorDb.from('hearings').insert({
-      case_id: params.caseId,
-      hearing_date: params.nextDate,
-      purpose: params.nextPurpose || 'Next Proceeding',
-      attended_by: params.attendedBy || null,
-    });
+    const { data: existingNext } = await litigatorDb
+      .from('hearings')
+      .select('id')
+      .eq('case_id', params.caseId)
+      .eq('hearing_date', params.nextDate)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingNext) {
+      await litigatorDb
+        .from('hearings')
+        .update({
+          purpose: params.nextPurpose || 'Next Proceeding',
+          attended_by: params.attendedBy || null,
+        })
+        .eq('id', existingNext.id);
+    } else {
+      await litigatorDb.from('hearings').insert({
+        case_id: params.caseId,
+        hearing_date: params.nextDate,
+        purpose: params.nextPurpose || 'Next Proceeding',
+        attended_by: params.attendedBy || null,
+      });
+    }
 
     await litigatorDb
       .from('cases')
@@ -1349,20 +1369,41 @@ export async function updateAfterHearing(params: {
     console.warn('Could not fetch case for project_code_id:', err);
   }
 
-  // 4. Write core.matter_events with event_code: HEARING_ATTENDED
+  // 4. Update or write core.matter_events with event_code: HEARING_ATTENDED
   if (theCase?.project_code_id) {
     try {
-      await recordMatterEvent({
-        projectCodeId: theCase.project_code_id,
-        eventCode: 'HEARING_ATTENDED',
-        title: `Hearing Attended: ${params.outcome}`,
-        detail: `Purpose: ${params.purpose}. Outcome: ${params.outcome}. Next Date: ${params.nextDate || 'None'} (${params.nextPurpose || 'N/A'})`,
-        occurredAt: params.hearingDate,
-        actorUserId: params.attendedBy || undefined,
-        clientVisible: true,
-      });
+      const occurredDate = params.hearingDate.includes('T')
+        ? params.hearingDate
+        : new Date(params.hearingDate).toISOString();
+
+      const { data: existingEvents } = await coreDb
+        .from('matter_events')
+        .select('id')
+        .eq('project_code_id', theCase.project_code_id)
+        .eq('event_code', 'HEARING_ATTENDED')
+        .eq('occurred_at', occurredDate)
+        .limit(1);
+
+      if (existingEvents && existingEvents.length > 0) {
+        await updateMatterEvent(existingEvents[0].id, {
+          title: `Hearing Attended: ${params.outcome}`,
+          detail: `Purpose: ${params.purpose}. Outcome: ${params.outcome}. Next Date: ${params.nextDate || 'None'} (${params.nextPurpose || 'N/A'})`,
+          occurredAt: params.hearingDate,
+          eventCode: 'HEARING_ATTENDED',
+        });
+      } else {
+        await recordMatterEvent({
+          projectCodeId: theCase.project_code_id,
+          eventCode: 'HEARING_ATTENDED',
+          title: `Hearing Attended: ${params.outcome}`,
+          detail: `Purpose: ${params.purpose}. Outcome: ${params.outcome}. Next Date: ${params.nextDate || 'None'} (${params.nextPurpose || 'N/A'})`,
+          occurredAt: params.hearingDate,
+          actorUserId: params.attendedBy || undefined,
+          clientVisible: true,
+        });
+      }
     } catch (auditErr) {
-      console.warn('Could not record core.matter_event for hearing outcome:', auditErr);
+      console.warn('Could not sync core.matter_event for hearing outcome:', auditErr);
     }
   }
 
@@ -2631,11 +2672,15 @@ export async function updateMatterEvent(
       PROCEDURAL: 'Procedural Compliance',
     };
     payload.client_label = categoryLabels[updates.eventCode] || updates.eventCode;
+    payload.metadata = {
+      category: updates.eventCode,
+      category_label: payload.client_label,
+    };
   }
 
   // 1. Try serverless / Vite dev API endpoint (service-role privileges to bypass RLS)
   try {
-    const res = await fetch('/api/matter-events', {
+    const res = await fetch(`/api/matter-events?id=${encodeURIComponent(eventId)}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
