@@ -23,7 +23,6 @@ import {
 } from 'lucide-react';
 import {
   getStoredUser,
-  setStoredUser,
   signOutUser,
   UserProfile,
   Role,
@@ -53,54 +52,18 @@ export const AppLayout: React.FC = () => {
 
   // Verify Supabase auth session on mount & subscribe to auth changes
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
       const stored = getStoredUser();
-      if (!session) {
+      if (!session || !stored) {
         signOutUser();
         navigate('/login', { replace: true });
-      } else if (!stored) {
-        // SSO Session auto-hydration from core.profiles
-        try {
-          const { data: prof } = await supabase
-            .schema('core')
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .maybeSingle();
-
-          const u: UserProfile = prof ? {
-            id: prof.id,
-            email: prof.email,
-            display_name: prof.display_name,
-            role: prof.role,
-            department: prof.department,
-            reports_to: prof.reports_to,
-            is_finance_lead: prof.role === 'FINANCE',
-            active: prof.active,
-          } : {
-            id: session.user.id,
-            email: session.user.email || '',
-            display_name: session.user.user_metadata?.display_name || session.user.email?.split('@')[0] || 'User',
-            role: session.user.user_metadata?.role || 'ASSOCIATE',
-            department: session.user.user_metadata?.department || 'LITIGATION',
-            is_finance_lead: false,
-            active: true,
-          };
-
-          setStoredUser(u);
-          setCurrentUser(u);
-        } catch (e) {
-          console.warn('SSO profile hydration error:', e);
-        } finally {
-          setAuthChecking(false);
-        }
       } else {
         setCurrentUser(stored);
         setAuthChecking(false);
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session) {
         signOutUser();
         navigate('/login', { replace: true });
@@ -109,34 +72,6 @@ export const AppLayout: React.FC = () => {
         if (stored) {
           setCurrentUser(stored);
           setAuthChecking(false);
-        } else {
-          try {
-            const { data: prof } = await supabase
-              .schema('core')
-              .from('profiles')
-              .select('*')
-              .eq('id', session.user.id)
-              .maybeSingle();
-
-            if (prof) {
-              const u: UserProfile = {
-                id: prof.id,
-                email: prof.email,
-                display_name: prof.display_name,
-                role: prof.role,
-                department: prof.department,
-                reports_to: prof.reports_to,
-                is_finance_lead: prof.role === 'FINANCE',
-                active: prof.active,
-              };
-              setStoredUser(u);
-              setCurrentUser(u);
-            }
-          } catch (e) {
-            console.warn('Auth state hydration error:', e);
-          } finally {
-            setAuthChecking(false);
-          }
         }
       }
     });
@@ -230,14 +165,6 @@ export const AppLayout: React.FC = () => {
               </div>
               <p className="text-[10px] text-slate-400 hidden sm:block">Court Cases &amp; Agreements Vault</p>
             </div>
-            <a
-              href="http://localhost:5000"
-              className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition ml-2 shadow-2xs"
-              title="Return to Lextria Ecosystem Portal"
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>All Apps</span>
-            </a>
           </div>
         </div>
 
