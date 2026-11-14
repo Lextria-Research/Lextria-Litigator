@@ -23,6 +23,7 @@ const CASE_TYPES: { value: CaseType; label: string }[] = [
   { value: 'CONSUMER', label: 'Consumer Dispute' },
   { value: 'CRIMINAL_COMPLAINT', label: 'Criminal Complaint / NI Act 138' },
   { value: 'PRE_LITIGATION', label: 'Pre-Litigation / Legal Notice' },
+  { value: 'EXECUTION_PETITION', label: 'Execution Petition' },
   { value: 'OTHER', label: 'Other Court Matter' },
 ];
 

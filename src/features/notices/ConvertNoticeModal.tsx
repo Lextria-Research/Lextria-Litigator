@@ -32,6 +32,7 @@ const CASE_TYPE_OPTIONS: { value: CaseType; label: string }[] = [
   { value: 'CRIMINAL_COMPLAINT', label: 'Criminal Complaint / NI Act 138' },
   { value: 'CONSUMER', label: 'Consumer Forum Dispute' },
   { value: 'APPEAL', label: 'Appeal (First / Regular Appeal)' },
+  { value: 'EXECUTION_PETITION', label: 'Execution Petition (Court Decree)' },
   { value: 'OTHER', label: 'Other Court Proceeding' },
 ];
 

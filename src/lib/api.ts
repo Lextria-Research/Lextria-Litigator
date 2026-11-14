@@ -5,6 +5,7 @@ import { coreDb, litigatorDb, supabase } from './supabase';
 import { clock } from './clock';
 import type {
   CaseRecord,
+  CaseType,
   CasePartyRecord,
   HearingRecord,
   OrderRecord,
@@ -308,10 +309,17 @@ async function enrichCases(cases: any[]): Promise<CaseRecord[]> {
   }
 
   return cases.map((c) => {
+    const isExecutionPetition =
+      c.case_type === 'EXECUTION_PETITION' ||
+      (c.case_type === 'OTHER' && (c.bench?.includes('[Execution Petition]') || c.bench?.includes('[Type: Execution Petition]')));
+    const effectiveCaseType = isExecutionPetition ? ('EXECUTION_PETITION' as CaseType) : c.case_type;
+    const cleanBench = c.bench ? c.bench.replace(/(\s*•\s*)?\[(?:Type:\s*)?Execution Petition\]/g, '').trim() : c.bench;
     const leadUser = c.lead_user || profMap.get(c.lead_user_id) || undefined;
     const counselName = leadUser?.display_name || c.lead_counsel || c.leadCounsel || null;
     return {
       ...c,
+      case_type: effectiveCaseType,
+      bench: cleanBench || null,
       project_code: c.project_code || pcMap.get(c.project_code_id) || undefined,
       lead_user: leadUser,
       lead_counsel: counselName,
@@ -590,9 +598,16 @@ export async function fetchCases(filters?: {
 
   if (!error && data) {
     cases = (data as CaseRecord[]).map((c) => {
+      const isExecutionPetition =
+        c.case_type === 'EXECUTION_PETITION' ||
+        (c.case_type === 'OTHER' && (c.bench?.includes('[Execution Petition]') || c.bench?.includes('[Type: Execution Petition]')));
+      const effectiveCaseType = isExecutionPetition ? ('EXECUTION_PETITION' as CaseType) : c.case_type;
+      const cleanBench = c.bench ? c.bench.replace(/(\s*•\s*)?\[(?:Type:\s*)?Execution Petition\]/g, '').trim() : c.bench;
       const counselName = c.lead_user?.display_name || (c as any).lead_counsel || (c as any).leadCounsel || null;
       return {
         ...c,
+        case_type: effectiveCaseType,
+        bench: cleanBench || null,
         lead_counsel: counselName,
         leadCounsel: counselName,
         judgments: getCaseJudgments(c.id),
@@ -689,6 +704,13 @@ export async function fetchCaseById(id: string): Promise<CaseRecord> {
   }
 
   if (theCase) {
+    const isExecutionPetition =
+      theCase.case_type === 'EXECUTION_PETITION' ||
+      (theCase.case_type === 'OTHER' && (theCase.bench?.includes('[Execution Petition]') || theCase.bench?.includes('[Type: Execution Petition]')));
+    if (isExecutionPetition) {
+      theCase.case_type = 'EXECUTION_PETITION';
+      theCase.bench = theCase.bench ? theCase.bench.replace(/(\s*•\s*)?\[(?:Type:\s*)?Execution Petition\]/g, '').trim() || null : theCase.bench;
+    }
     const counselName = theCase.lead_user?.display_name || (theCase as any).lead_counsel || (theCase as any).leadCounsel || null;
     theCase.lead_counsel = counselName;
     theCase.leadCounsel = counselName;
@@ -860,7 +882,7 @@ export async function createCase(params: CreateCaseParams): Promise<{ id: string
     }
   }
 
-  const { data, error } = await supabase.schema('litigator').rpc('create_case', {
+  let rpcResult = await supabase.schema('litigator').rpc('create_case', {
     p_project_code: params.projectCode,
     p_case_type: params.caseType,
     p_court: params.court,
@@ -881,6 +903,38 @@ export async function createCase(params: CreateCaseParams): Promise<{ id: string
     p_next_purpose: params.nextPurpose || null,
     p_opposite_party_name: params.oppositePartyName || null,
   });
+
+  // Resilient fallback: if the database check constraint cases_case_type_check hasn't been migrated yet in Supabase
+  if (
+    rpcResult.error &&
+    params.caseType === 'EXECUTION_PETITION' &&
+    (rpcResult.error.code === '23514' || rpcResult.error.message?.includes('cases_case_type_check'))
+  ) {
+    const fallbackBench = params.bench ? `${params.bench} • [Execution Petition]` : '[Execution Petition]';
+    rpcResult = await supabase.schema('litigator').rpc('create_case', {
+      p_project_code: params.projectCode,
+      p_case_type: 'OTHER',
+      p_court: params.court,
+      p_cause_title: params.causeTitle,
+      p_client_role: params.clientRole,
+      p_client_id: resolvedClientId,
+      p_new_client_name: resolvedNewClientName,
+      p_new_client_code: resolvedNewClientCode,
+      p_bench: fallbackBench,
+      p_case_number: params.caseNumber || null,
+      p_cnr_number: params.cnrNumber || null,
+      p_filing_date: params.filingDate || null,
+      p_current_stage: params.currentStage || 'Suit filed',
+      p_lead_user_id: params.leadUserId || null,
+      p_claim_value: params.claimValue ?? null,
+      p_court_fee: params.courtFee ?? null,
+      p_next_hearing_date: params.nextHearingDate || null,
+      p_next_purpose: params.nextPurpose || null,
+      p_opposite_party_name: params.oppositePartyName || null,
+    });
+  }
+
+  const { data, error } = rpcResult;
 
   if (error) throw error;
   const caseId = data as string;
@@ -1075,11 +1129,31 @@ export async function updateCase(
     dbUpdates.lead_user_id = resolvedLeadUserId;
   }
 
-  const { error } = await litigatorDb
+  let updateResult = await litigatorDb
     .from('cases')
     .update(dbUpdates)
     .eq('id', caseId);
-  if (error) throw error;
+
+  // Resilient fallback for cases_case_type_check if DB constraint not yet altered
+  if (
+    updateResult.error &&
+    dbUpdates.case_type === 'EXECUTION_PETITION' &&
+    (updateResult.error.code === '23514' || updateResult.error.message?.includes('cases_case_type_check'))
+  ) {
+    const rawBench = dbUpdates.bench !== undefined ? dbUpdates.bench : (await fetchCaseById(caseId))?.bench;
+    const cleanBench = (rawBench || '').replace(/(\s*•\s*)?\[(?:Type:\s*)?Execution Petition\]/g, '').trim();
+    const fallbackBench = cleanBench ? `${cleanBench} • [Execution Petition]` : '[Execution Petition]';
+    updateResult = await litigatorDb
+      .from('cases')
+      .update({
+        ...dbUpdates,
+        case_type: 'OTHER',
+        bench: fallbackBench,
+      })
+      .eq('id', caseId);
+  }
+
+  if (updateResult.error) throw updateResult.error;
 
   // Keep project_code lead assignee, case_team, and unupdated hearings in sync with the updated lead counsel
   if (resolvedLeadUserId) {
@@ -2995,7 +3069,7 @@ export async function convertNoticeToCourtCase(params: {
   judgeName?: string;
   stage?: string;
 }): Promise<CaseRecord> {
-  const { data: updatedCase, error } = await litigatorDb
+  let updateResult = await litigatorDb
     .from('cases')
     .update({
       case_type: params.caseType,
@@ -3010,6 +3084,31 @@ export async function convertNoticeToCourtCase(params: {
     .eq('id', params.caseId)
     .select('*')
     .single();
+
+  if (
+    updateResult.error &&
+    params.caseType === 'EXECUTION_PETITION' &&
+    (updateResult.error.code === '23514' || updateResult.error.message?.includes('cases_case_type_check'))
+  ) {
+    const fallbackBench = params.bench ? `${params.bench} • [Execution Petition]` : '[Execution Petition]';
+    updateResult = await litigatorDb
+      .from('cases')
+      .update({
+        case_type: 'OTHER',
+        court: params.courtName,
+        bench: fallbackBench,
+        case_number: params.caseNumber || null,
+        cnr_number: params.cnrNumber || null,
+        filing_date: params.filingDate || clock.todayYMD(),
+        judge_name: params.judgeName || null,
+        current_stage: params.stage || 'Pleadings',
+      })
+      .eq('id', params.caseId)
+      .select('*')
+      .single();
+  }
+
+  const { data: updatedCase, error } = updateResult;
 
   if (error) {
     console.error('Failed to convert notice to court case:', error);

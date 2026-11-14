@@ -377,6 +377,7 @@ export const NewCaseModal: React.FC<NewCaseModalProps> = ({ isOpen, onClose, onS
                 <option value="CONSUMER">Consumer</option>
                 <option value="CRIMINAL_COMPLAINT">Criminal Complaint</option>
                 <option value="PRE_LITIGATION">Pre-Litigation</option>
+                <option value="EXECUTION_PETITION">Execution Petition</option>
                 <option value="OTHER">Other</option>
               </select>
             </div>

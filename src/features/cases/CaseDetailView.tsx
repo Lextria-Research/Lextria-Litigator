@@ -274,7 +274,9 @@ export const CaseDetailView: React.FC = () => {
     // 1. Filing Date: ONLY if explicitly set and non-empty. Never default to entry date.
     const fDate = typeof theCase.filing_date === 'string' ? theCase.filing_date.trim() : '';
     if (fDate) {
-      const caseTypeDisplay = (theCase.case_type || 'Matter').replace(/_/g, ' ');
+      const caseTypeDisplay = theCase.case_type === 'EXECUTION_PETITION'
+        ? 'Execution Petition'
+        : (theCase.case_type || 'Matter').replace(/_/g, ' ');
       events.push({
         id: `filing-${theCase.id}`,
         date: fDate,

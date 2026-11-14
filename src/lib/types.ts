@@ -11,6 +11,7 @@ export type CaseType =
   | 'CONSUMER'
   | 'CRIMINAL_COMPLAINT'
   | 'PRE_LITIGATION'
+  | 'EXECUTION_PETITION'
   | 'OTHER';
 
 export type ClientRole =
