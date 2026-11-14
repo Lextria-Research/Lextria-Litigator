@@ -63,6 +63,9 @@ import {
   deleteStageExpense,
   fetchProjectCodes,
   syncCustomStagesFromDb,
+  getCaseJudgments,
+  attachJudgmentToCase,
+  deleteJudgmentFromCase,
 } from '../../lib/api';
 import { clock } from '../../lib/clock';
 import { formatINR, formatINRShort } from '../../lib/currency';
@@ -90,6 +93,7 @@ import {
   EXPENSE_CATEGORIES,
   getAllCaseStages,
   CoreProjectCode,
+  AttachedJudgment,
 } from '../../lib/types';
 import { UpdateHearingModal } from './UpdateHearingModal';
 import { EditCaseModal } from './EditCaseModal';
@@ -218,6 +222,9 @@ export const CaseDetailView: React.FC = () => {
 
   // Dynamic Case Stages state (standard + custom stages from DB & localStorage)
   const [stagesList, setStagesList] = useState<string[]>(() => getAllCaseStages());
+
+  // Judgment Copies attachments state
+  const [caseJudgments, setCaseJudgments] = useState<AttachedJudgment[]>([]);
 
   useEffect(() => {
     syncCustomStagesFromDb().then(() => {
@@ -401,6 +408,7 @@ export const CaseDetailView: React.FC = () => {
     try {
       const c = await fetchCaseById(id);
       setTheCase(c);
+      setCaseJudgments(getCaseJudgments(id));
 
       const [hList, oList, dList, pList, ipList, profs, allPcs] = await Promise.all([
         fetchHearings(id),
@@ -475,6 +483,38 @@ export const CaseDetailView: React.FC = () => {
       loadCase();
     } catch (e: any) {
       alert(`Could not update stage: ${e.message}`);
+    }
+  };
+
+  const handleAttachJudgment = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !theCase) return;
+    try {
+      const judgment = await attachJudgmentToCase({
+        caseId: theCase.id,
+        file,
+        projectCode: theCase.project_code?.code,
+        projectCodeId: theCase.project_code_id,
+        clientCode: theCase.project_code?.client?.client_code,
+        clientName: theCase.project_code?.client?.client_name,
+      });
+      setCaseJudgments((prev) => [judgment, ...prev.filter((j) => j.id !== judgment.id)]);
+      loadCase();
+    } catch (err: any) {
+      alert(err.message || 'Failed to attach judgment');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleRemoveJudgment = async (judgmentId: string, documentId?: string) => {
+    if (!theCase || !confirm('Are you sure you want to remove this attached judgment?')) return;
+    try {
+      const remaining = await deleteJudgmentFromCase(theCase.id, judgmentId, documentId);
+      setCaseJudgments(remaining);
+      loadCase();
+    } catch (err: any) {
+      alert(err.message || 'Failed to remove judgment');
     }
   };
 
@@ -737,7 +777,7 @@ export const CaseDetailView: React.FC = () => {
                 Client: {theCase.project_code?.client?.client_name} ({theCase.client_role})
               </span>
               <span>•</span>
-              <span>Lead: {theCase.lead_user?.display_name || 'Unassigned'}</span>
+              <span>Lead: {theCase.lead_user?.display_name || (theCase as any).leadCounsel || (theCase as any).lead_counsel || 'Unassigned'}</span>
             </div>
           </div>
 
@@ -896,6 +936,63 @@ export const CaseDetailView: React.FC = () => {
                 </div>
               ) : null}
             </div>
+          )}
+        </div>
+
+        {/* Attached Judgment Copies */}
+        <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1">
+              <Scale className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Judgment Copies:</span>
+            </span>
+            {caseJudgments.length === 0 ? (
+              <span className="text-slate-400 text-xs italic">No judgment attached</span>
+            ) : (
+              caseJudgments.map((j) => (
+                <div
+                  key={j.id}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                >
+                  <FileText className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span className="font-medium max-w-[180px] truncate" title={j.file_name}>
+                    {j.file_name}
+                  </span>
+                  <span className="text-[10px] text-slate-400">({clock.formatDisplay(j.attached_at)})</span>
+                  <a
+                    href={j.file_url || '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-semibold hover:underline ml-1"
+                  >
+                    View / Download
+                  </a>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveJudgment(j.id, j.document_id)}
+                      className="text-slate-400 hover:text-rose-600 transition p-0.5 ml-0.5"
+                      title="Remove judgment"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+
+          {canEdit && (
+            <label className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 rounded-lg cursor-pointer transition border border-indigo-200 dark:border-indigo-800 shadow-2xs">
+              <Upload className="w-3.5 h-3.5" />
+              <span>Attach Judgment</span>
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx"
+                className="hidden"
+                onChange={handleAttachJudgment}
+              />
+            </label>
           )}
         </div>
       </div>
@@ -2435,7 +2532,22 @@ export const CaseDetailView: React.FC = () => {
           setMilestoneModalOpen(false);
           setTargetMilestone(null);
         }}
-        onSuccess={loadCase}
+        onSuccess={(updated) => {
+          if (updated && updated.id) {
+            if (updated._deleted) {
+              setTimeline((prev) => prev.filter((m) => m.id !== updated.id));
+            } else {
+              setTimeline((prev) => {
+                const exists = prev.some((m) => m.id === updated.id);
+                if (exists) {
+                  return prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m));
+                }
+                return [updated, ...prev];
+              });
+            }
+          }
+          loadCase();
+        }}
         projectCodeId={theCase.project_code_id}
         existingMilestone={targetMilestone}
       />

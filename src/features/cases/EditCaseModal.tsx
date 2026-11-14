@@ -76,7 +76,21 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      fetchProfiles().then(setProfiles).catch(console.error);
+      fetchProfiles().then((profs) => {
+        setProfiles(profs);
+        const resolvedId = theCase.lead_user_id || theCase.lead_user?.id;
+        if (resolvedId) {
+          setLeadUserId(resolvedId);
+        } else {
+          const counselName = theCase.leadCounsel || theCase.lead_counsel || theCase.lead_user?.display_name;
+          if (counselName) {
+            const match = profs.find(
+              (p) => p.display_name?.toLowerCase() === counselName.toLowerCase() || p.id === counselName
+            );
+            if (match) setLeadUserId(match.id);
+          }
+        }
+      }).catch(console.error);
       setProjectCode(theCase.project_code?.code || '');
       setCauseTitle(theCase.cause_title || '');
       setCaseType(theCase.case_type || 'COMMERCIAL_SUIT');
@@ -87,7 +101,7 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
       setFilingDate(theCase.filing_date || '');
       setClientRole(theCase.client_role || 'PLAINTIFF');
       setCurrentStage(theCase.current_stage || 'Suit filed');
-      setLeadUserId(theCase.lead_user_id || '');
+      setLeadUserId(theCase.lead_user_id || theCase.lead_user?.id || '');
       setClaimValue(theCase.claim_value ?? '');
       setCourtFee(theCase.court_fee ?? '');
       setNextHearingDate(theCase.next_hearing_date || '');
@@ -119,6 +133,9 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
     setError(null);
 
     try {
+      const selectedProf = profiles.find((p) => p.id === leadUserId);
+      const counselName = selectedProf?.display_name || null;
+
       await updateCase(
         theCase.id,
         {
@@ -132,6 +149,8 @@ export const EditCaseModal: React.FC<EditCaseModalProps> = ({
           client_role: clientRole,
           current_stage: currentStage as any,
           lead_user_id: leadUserId || null,
+          lead_counsel: counselName,
+          leadCounsel: counselName,
           claim_value: claimValue ? Number(claimValue) : null,
           court_fee: courtFee ? Number(courtFee) : null,
           next_hearing_date: nextHearingDate || null,

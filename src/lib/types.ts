@@ -113,6 +113,9 @@ export interface CaseRecord {
   created_at: string;
   opponent_name?: string | null;
   judge_name?: string | null;
+  lead_counsel?: string | null;
+  leadCounsel?: string | null;
+  judgments?: AttachedJudgment[];
 
   // Joined relations
   project_code?: CoreProjectCode | null;
@@ -121,6 +124,47 @@ export interface CaseRecord {
   quotation?: QuotationRecord | null;
   quotation_amount?: number | null;
   quotation_number?: string | null;
+}
+
+export interface AttachedJudgment {
+  id: string;
+  case_id: string;
+  file_name: string;
+  file_url?: string;
+  document_id?: string;
+  size_bytes?: number;
+  attached_at: string;
+}
+
+export function getCaseJudgments(caseId: string): AttachedJudgment[] {
+  try {
+    const raw = localStorage.getItem(`lextria_judgments_${caseId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCaseJudgment(caseId: string, judgment: AttachedJudgment): AttachedJudgment[] {
+  const current = getCaseJudgments(caseId);
+  const updated = [judgment, ...current.filter((j) => j.id !== judgment.id)];
+  try {
+    localStorage.setItem(`lextria_judgments_${caseId}`, JSON.stringify(updated));
+  } catch (e) {
+    console.warn('Could not persist judgment to localStorage:', e);
+  }
+  return updated;
+}
+
+export function removeCaseJudgment(caseId: string, judgmentId: string): AttachedJudgment[] {
+  const current = getCaseJudgments(caseId);
+  const updated = current.filter((j) => j.id !== judgmentId);
+  try {
+    localStorage.setItem(`lextria_judgments_${caseId}`, JSON.stringify(updated));
+  } catch (e) {
+    console.warn('Could not remove judgment from localStorage:', e);
+  }
+  return updated;
 }
 
 export interface QuotationRecord {

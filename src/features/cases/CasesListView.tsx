@@ -391,10 +391,10 @@ export const CasesListView: React.FC = () => {
                     {/* Lead */}
                     <td className="py-3.5 px-4">
                       <div className="font-medium text-slate-800 dark:text-slate-200">
-                        {c.lead_user?.display_name || 'Unassigned'}
+                        {c.lead_user?.display_name || c.leadCounsel || c.lead_counsel || 'Unassigned'}
                       </div>
                       <div className="text-[10px] text-slate-400 capitalize">
-                        {c.lead_user?.role.toLowerCase().replace(/_/g, ' ')}
+                        {c.lead_user?.role ? c.lead_user.role.toLowerCase().replace(/_/g, ' ') : 'Counsel'}
                       </div>
                     </td>
 

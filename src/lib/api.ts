@@ -25,9 +25,12 @@ import type {
   QuotationRecord,
   ClientNoteRecord,
   StageExpenseRecord,
+  AttachedJudgment,
 } from './types';
-import { getCustomCaseStages, saveCustomCaseStages } from './types';
+import { getCustomCaseStages, saveCustomCaseStages, getCaseJudgments, saveCaseJudgment, removeCaseJudgment } from './types';
+export { getCaseJudgments, saveCaseJudgment, removeCaseJudgment };
 import { getStoredUser, isSuperAdminOrFinance } from './auth';
+import { uploadLitigatorFile, getDocumentUrl, deleteProjectDocument } from './files';
 
 // ==========================================
 // 1. PROFILES & CLIENTS & PROJECT CODES
@@ -278,12 +281,19 @@ async function enrichCases(cases: any[]): Promise<CaseRecord[]> {
     }
   }
 
-  return cases.map((c) => ({
-    ...c,
-    project_code: c.project_code || pcMap.get(c.project_code_id) || undefined,
-    lead_user: c.lead_user || profMap.get(c.lead_user_id) || undefined,
-    quotation: isSuperAdminOrFinance(currentUser) ? quoteMap.get(c.project_code_id) || undefined : undefined,
-  })) as CaseRecord[];
+  return cases.map((c) => {
+    const leadUser = c.lead_user || profMap.get(c.lead_user_id) || undefined;
+    const counselName = leadUser?.display_name || c.lead_counsel || c.leadCounsel || null;
+    return {
+      ...c,
+      project_code: c.project_code || pcMap.get(c.project_code_id) || undefined,
+      lead_user: leadUser,
+      lead_counsel: counselName,
+      leadCounsel: counselName,
+      judgments: getCaseJudgments(c.id),
+      quotation: isSuperAdminOrFinance(currentUser) ? quoteMap.get(c.project_code_id) || undefined : undefined,
+    };
+  }) as CaseRecord[];
 }
 
 async function enrichAgreements(agreements: any[]): Promise<AgreementRecord[]> {
@@ -553,7 +563,15 @@ export async function fetchCases(filters?: {
   let cases: CaseRecord[];
 
   if (!error && data) {
-    cases = data as CaseRecord[];
+    cases = (data as CaseRecord[]).map((c) => {
+      const counselName = c.lead_user?.display_name || (c as any).lead_counsel || (c as any).leadCounsel || null;
+      return {
+        ...c,
+        lead_counsel: counselName,
+        leadCounsel: counselName,
+        judgments: getCaseJudgments(c.id),
+      };
+    });
     const currentUser = getStoredUser();
     if (isSuperAdminOrFinance(currentUser) && cases.length > 0) {
       const pcIds = [...new Set(cases.map((c) => c.project_code_id).filter(Boolean))];
@@ -642,6 +660,13 @@ export async function fetchCaseById(id: string): Promise<CaseRecord> {
 
     const [enriched] = await enrichCases([rawCase]);
     theCase = enriched;
+  }
+
+  if (theCase) {
+    const counselName = theCase.lead_user?.display_name || (theCase as any).lead_counsel || (theCase as any).leadCounsel || null;
+    theCase.lead_counsel = counselName;
+    theCase.leadCounsel = counselName;
+    theCase.judgments = getCaseJudgments(theCase.id);
   }
 
   if (theCase && isSuperAdminOrFinance(currentUser) && theCase.project_code_id) {
@@ -1006,9 +1031,27 @@ export async function updateCase(
     }
   }
 
+  // Resolve lead_user_id if leadCounsel/lead_counsel was supplied as a name
+  let resolvedLeadUserId = updates.lead_user_id;
+  const leadCounselName = updates.leadCounsel || updates.lead_counsel;
+  if (!resolvedLeadUserId && leadCounselName) {
+    const { data: prof } = await coreDb
+      .from('profiles')
+      .select('id')
+      .ilike('display_name', leadCounselName.trim())
+      .limit(1)
+      .maybeSingle();
+    if (prof) resolvedLeadUserId = prof.id;
+  }
+
+  const { leadCounsel, lead_counsel, quotation, project_code, lead_user, parties, judgments, ...dbUpdates } = updates as any;
+  if (resolvedLeadUserId !== undefined) {
+    dbUpdates.lead_user_id = resolvedLeadUserId;
+  }
+
   const { error } = await litigatorDb
     .from('cases')
-    .update(updates)
+    .update(dbUpdates)
     .eq('id', caseId);
   if (error) throw error;
 
@@ -1051,6 +1094,57 @@ export async function updateCase(
   }
 
   return fetchCaseById(caseId);
+}
+
+export async function attachJudgmentToCase(params: {
+  caseId: string;
+  file: File;
+  projectCode?: string;
+  projectCodeId?: string;
+  clientCode?: string;
+  clientName?: string;
+}): Promise<AttachedJudgment> {
+  let docId: string | undefined;
+  let fileUrl = '';
+  try {
+    const doc = await uploadLitigatorFile({
+      file: params.file,
+      category: 'Orders',
+      clientCode: params.clientCode,
+      clientName: params.clientName,
+      projectCode: params.projectCode,
+      projectCodeId: params.projectCodeId,
+    });
+    docId = doc.id;
+    fileUrl = await getDocumentUrl(doc);
+  } catch (err) {
+    console.warn('Could not upload file via storage provider, fallback to object url:', err);
+    fileUrl = URL.createObjectURL(params.file);
+  }
+
+  const judgment: AttachedJudgment = {
+    id: docId || crypto.randomUUID(),
+    case_id: params.caseId,
+    file_name: params.file.name,
+    file_url: fileUrl,
+    document_id: docId,
+    size_bytes: params.file.size,
+    attached_at: new Date().toISOString(),
+  };
+
+  saveCaseJudgment(params.caseId, judgment);
+  return judgment;
+}
+
+export async function deleteJudgmentFromCase(caseId: string, judgmentId: string, documentId?: string): Promise<AttachedJudgment[]> {
+  if (documentId) {
+    try {
+      await deleteProjectDocument(documentId);
+    } catch (e) {
+      console.warn('Could not delete document from storage:', e);
+    }
+  }
+  return removeCaseJudgment(caseId, judgmentId);
 }
 
 // ==========================================

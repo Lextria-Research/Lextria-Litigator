@@ -63,11 +63,6 @@ export const LoginView: React.FC = () => {
 
       const finalEmail = authEmail || cleanInput.toLowerCase();
 
-      // Convenience password normalization for legacy 334
-      if (pwd === '334' && finalEmail === 'pranavbhat@lextria.in') {
-        pwd = 'Pranav@334';
-      }
-
       const { data, error: authErr } = await supabase.auth.signInWithPassword({
         email: finalEmail,
         password: pwd,
@@ -78,6 +73,9 @@ export const LoginView: React.FC = () => {
       }
 
       if (data?.user) {
+        const meta = data.user.user_metadata || {};
+        const dashAccess = meta.dashboard_access || {};
+
         // Fetch official profile from core.profiles
         const { data: profileData } = await supabase
           .schema('core')
@@ -86,13 +84,20 @@ export const LoginView: React.FC = () => {
           .eq('id', data.user.id)
           .maybeSingle();
 
+        const isSuperAdmin = profileData?.role === 'SUPER_ADMIN' || meta.role === 'SUPER_ADMIN';
+        const litAccess = dashAccess.litigator || {};
+
+        if (!isSuperAdmin && litAccess.enabled === false) {
+          throw new Error('Access to Litigator is disabled for your account. Please contact an Administrator.');
+        }
+
         const profile: UserProfile = profileData || {
           id: data.user.id,
           email: data.user.email || finalEmail,
-          display_name: data.user.user_metadata?.display_name || finalEmail.split('@')[0],
-          role: data.user.user_metadata?.role || 'SUPER_ADMIN',
-          department: data.user.user_metadata?.department || 'MANAGEMENT',
-          is_finance_lead: data.user.user_metadata?.role === 'FINANCE',
+          display_name: meta.display_name || finalEmail.split('@')[0],
+          role: profileData?.role || meta.role || 'STAFF',
+          department: profileData?.department || meta.department || 'LITIGATION',
+          is_finance_lead: false,
           active: true,
         };
 

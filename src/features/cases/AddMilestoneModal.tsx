@@ -8,7 +8,7 @@ import { getStoredUser } from '../../lib/auth';
 interface AddMilestoneModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (updatedMilestone?: any) => void;
   projectCodeId: string;
   existingMilestone?: {
     id: string;
@@ -70,9 +70,19 @@ export const AddMilestoneModal: React.FC<AddMilestoneModalProps> = ({
           occurredAt: date,
           eventCode: category,
         });
+        const updated = {
+          id: existingMilestone.id,
+          title: title.trim(),
+          detail: detail.trim() || null,
+          occurred_at: new Date(date).toISOString(),
+          event_code: category,
+          client_label: category,
+          metadata: { category, category_label: category },
+        };
+        onSuccess(updated);
       } else {
         const currentUser = getStoredUser();
-        await createCustomMilestone({
+        const created = await createCustomMilestone({
           projectCodeId,
           title: title.trim(),
           detail: detail.trim() || undefined,
@@ -80,9 +90,9 @@ export const AddMilestoneModal: React.FC<AddMilestoneModalProps> = ({
           category,
           actorUserId: currentUser?.id,
         });
+        onSuccess(created);
       }
 
-      onSuccess();
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to save milestone');
@@ -99,7 +109,7 @@ export const AddMilestoneModal: React.FC<AddMilestoneModalProps> = ({
     setError(null);
     try {
       await deleteMatterEvent(existingMilestone.id);
-      onSuccess();
+      onSuccess({ id: existingMilestone.id, _deleted: true });
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to delete milestone');

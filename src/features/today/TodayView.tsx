@@ -12,11 +12,13 @@ import {
   CheckCircle2,
   AlertCircle,
   FileText,
+  Upload,
+  Trash2,
 } from 'lucide-react';
 import { litigatorDb } from '../../lib/supabase';
 import { clock } from '../../lib/clock';
-import { fetchTodayDashboard, fetchCases } from '../../lib/api';
-import type { CaseRecord } from '../../lib/types';
+import { fetchTodayDashboard, fetchCases, getCaseJudgments, attachJudgmentToCase, deleteJudgmentFromCase } from '../../lib/api';
+import type { CaseRecord, AttachedJudgment } from '../../lib/types';
 import { getStoredUser, canEditCaseData } from '../../lib/auth';
 import { UpdateHearingModal } from '../cases/UpdateHearingModal';
 import { NewCaseModal } from '../cases/NewCaseModal';
@@ -71,6 +73,36 @@ export const TodayView: React.FC = () => {
       console.error('Error loading Today dashboard:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAttachJudgment = async (c: CaseRecord, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      await attachJudgmentToCase({
+        caseId: c.id,
+        file,
+        projectCode: c.project_code?.code,
+        projectCodeId: c.project_code_id,
+        clientCode: c.project_code?.client?.client_code,
+        clientName: c.project_code?.client?.client_name,
+      });
+      loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to attach judgment');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleRemoveJudgment = async (caseId: string, judgmentId: string, documentId?: string) => {
+    if (!confirm('Are you sure you want to remove this attached judgment?')) return;
+    try {
+      await deleteJudgmentFromCase(caseId, judgmentId, documentId);
+      loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to remove judgment');
     }
   };
 
@@ -242,7 +274,7 @@ export const TodayView: React.FC = () => {
 
                     <div className="mt-3 pt-2.5 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
                       <span className="text-[11px] text-slate-500">
-                        Counsel: {h.attending_profile?.display_name || 'Assigned Lead'}
+                        Counsel: {h.attending_profile?.display_name || h.case?.lead_user?.display_name || (h.case as any)?.leadCounsel || (h.case as any)?.lead_counsel || 'Unassigned'}
                       </span>
                       <div className="flex items-center gap-2">
                         {canEdit && (
@@ -521,12 +553,56 @@ export const TodayView: React.FC = () => {
                         <span className="font-mono">No: {c.case_number}</span>
                       </>
                     )}
-                    {c.lead_user?.display_name && (
+                    {(c.lead_user?.display_name || c.leadCounsel || c.lead_counsel) && (
                       <>
                         <span>•</span>
-                        <span>Counsel: <strong className="font-medium text-slate-700 dark:text-slate-300">{c.lead_user.display_name}</strong></span>
+                        <span>Counsel: <strong className="font-medium text-slate-700 dark:text-slate-300">{c.lead_user?.display_name || c.leadCounsel || c.lead_counsel}</strong></span>
                       </>
                     )}
+                  </div>
+
+                  {/* Judgment Copy Attachments */}
+                  <div className="mt-2 flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    {canEdit && (
+                      <label className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 rounded cursor-pointer transition border border-indigo-200 dark:border-indigo-800">
+                        <Upload className="w-3 h-3" />
+                        <span>Attach Judgment</span>
+                        <input
+                          type="file"
+                          accept=".pdf,.doc,.docx"
+                          className="hidden"
+                          onChange={(e) => handleAttachJudgment(c, e)}
+                        />
+                      </label>
+                    )}
+                    {(c.judgments && c.judgments.length > 0 ? c.judgments : getCaseJudgments(c.id)).map((j: AttachedJudgment) => (
+                      <div
+                        key={j.id}
+                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                      >
+                        <FileText className="w-3 h-3 text-indigo-500 shrink-0" />
+                        <span className="font-medium truncate max-w-[140px]" title={j.file_name}>{j.file_name}</span>
+                        <span className="text-[10px] text-slate-400">({clock.formatDisplay(j.attached_at)})</span>
+                        <a
+                          href={j.file_url || '#'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-semibold hover:underline"
+                        >
+                          View
+                        </a>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveJudgment(c.id, j.id, j.document_id)}
+                            className="text-slate-400 hover:text-rose-600 transition p-0.5"
+                            title="Remove judgment"
+                          >
+                            <Trash2 className="w-2.5 h-2.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
 
